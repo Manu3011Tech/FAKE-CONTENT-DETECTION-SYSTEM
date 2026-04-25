@@ -37,7 +37,6 @@ def generate_text_reasoning(text, fake_score):
     reasoning = []
     suggestions = []
     
-    # Fake indicators
     sensational = ['breaking', 'urgent', 'shocking', 'viral', 'alert', 'warning', 'miracle', 'unbelievable']
     found = [w for w in sensational if w in text_lower]
     if found:
@@ -54,34 +53,19 @@ def generate_text_reasoning(text, fake_score):
         reasoning.append(f"⚠️ Multiple exclamations ({exclamation_count} ! marks)")
         suggestions.append("✓ Excessive punctuation often indicates emotional manipulation")
     
-    urgent_words = ['urgent', 'immediately', 'asap', 'now', 'breaking']
-    if any(w in text_lower for w in urgent_words):
-        reasoning.append("⚠️ Urgency language detected")
-        suggestions.append("✓ Fake news creates false urgency to prevent verification")
-    
-    # Source check
-    source_words = ['according to', 'reuters', 'ap', 'bbc', 'cnn', 'official']
-    found_sources = [s for s in source_words if s in text_lower]
-    if not found_sources and len(text.split()) > 100:
-        reasoning.append("⚠️ No credible sources cited")
-        suggestions.append("✓ Always check if the news cites verifiable sources")
-    
     if fake_score > 0.7:
         reasoning.append("🔴 HIGH PROBABILITY OF FAKE NEWS")
         suggestions.append("🚨 Do NOT share this content without verification")
         suggestions.append("✓ Check fact-checking websites (Snopes, FactCheck.org)")
-        suggestions.append("✓ Look for the original source of the information")
     elif fake_score > 0.5:
         reasoning.append("🟠 SUSPICIOUS - Verify before sharing")
         suggestions.append("⚠️ Cross-reference with multiple trusted news sources")
-        suggestions.append("✓ Check the publication date and author credentials")
     elif fake_score > 0.3:
         reasoning.append("🟡 UNCERTAIN - Mixed signals")
         suggestions.append("✓ Verify with trusted sources before sharing")
     else:
         reasoning.append("🟢 LIKELY REAL - Patterns consistent with legitimate news")
         suggestions.append("✅ Content appears legitimate")
-        suggestions.append("✓ Still verify critical claims with official sources")
     
     return " | ".join(reasoning), suggestions
 
@@ -121,16 +105,13 @@ def layer1_reality_defender(image_file, api_key):
         
         return 0.5
     except Exception as e:
-        print(f"API error: {e}")
         return 0.5
 
-# ==================== LAYER 2: ENHANCED ELA (Local Edits) ====================
+# ==================== LAYER 2: ELA ANALYSIS ====================
 def layer2_ela_analysis(image_file):
-    """Enhanced ELA for clothes change, Photoshop detection"""
     try:
         img = Image.open(image_file).convert('RGB')
         
-        # Multiple quality levels for better detection
         quality_levels = [95, 85, 75, 65]
         ela_scores = []
         
@@ -149,29 +130,14 @@ def layer2_ela_analysis(image_file):
             ela_scores.append(np.mean(diff_array) / 255.0)
         
         ela_score = np.mean(ela_scores)
-        
-        # Higher score = more likely manipulated
         fake_score = min(ela_score * 1.8, 0.95)
         
         return fake_score, f"ELA score: {ela_score:.2%}"
     except Exception as e:
         return 0.3, "ELA analysis failed"
 
-
-# ==================== RESNET18 + ELA DETECTION MODEL ====================
-class ResNet18ELA(nn.Module):
-    """ResNet18 model for tampering detection"""
-    def __init__(self):
-        super(ResNet18ELA, self).__init__()
-        self.resnet = models.resnet18(weights='IMAGENET1K_V1')
-        in_features = self.resnet.fc.in_features
-        self.resnet.fc = nn.Linear(in_features, 2)
-    
-    def forward(self, x):
-        return self.resnet(x)
-
+# ==================== GENERATE ELA IMAGE ====================
 def generate_ela_image(image, quality=90):
-    """Generate Error Level Analysis image"""
     temp_orig = io.BytesIO()
     image.save(temp_orig, format='JPEG', quality=quality)
     temp_orig.seek(0)
@@ -187,16 +153,15 @@ def generate_ela_image(image, quality=90):
     
     return ela_img
 
+# ==================== LOCAL EDITS DETECTION ====================
 def detect_local_edits_enhanced(image_file):
-    """More sensitive detection for fake content"""
     try:
         img = Image.open(image_file).convert('RGB')
         img_array = np.array(img)
         
-        fake_score = 0.35  # 🔥 Increased base score (was 0.20)
+        fake_score = 0.30
         reasons = []
         
-        # 1. Multi-quality ELA test
         ela_scores = []
         for quality in [95, 85, 75, 65]:
             ela_img = generate_ela_image(img, quality=quality)
@@ -207,24 +172,22 @@ def detect_local_edits_enhanced(image_file):
         avg_ela = np.mean(ela_scores)
         ela_std = np.std(ela_scores)
         
-        if ela_std > 0.10:  # Lowered threshold
-            fake_score += 0.25
+        if ela_std > 0.08:
+            fake_score += 0.30
             reasons.append("Inconsistent ELA across qualities")
-        elif avg_ela > 0.20:  # Lowered threshold
-            fake_score += 0.20
+        elif avg_ela > 0.18:
+            fake_score += 0.25
             reasons.append("High ELA intensity detected")
         
-        # 2. Edge analysis
         from scipy import ndimage
         gray = np.dot(img_array[...,:3], [0.299, 0.587, 0.114])
         edges = np.abs(ndimage.sobel(gray))
         edge_density = np.mean(edges)
         
-        if edge_density > 45:  # Lowered threshold
+        if edge_density > 40:
             fake_score += 0.15
             reasons.append("Unnatural edge patterns")
         
-        # 3. Texture consistency check
         h, w = gray.shape
         quadrants = [
             gray[:h//2, :w//2],
@@ -235,36 +198,31 @@ def detect_local_edits_enhanced(image_file):
         quadrant_vars = [np.var(q) for q in quadrants]
         var_std = np.std(quadrant_vars)
         
-        if var_std > 30:  # Lowered threshold
+        if var_std > 25:
             fake_score += 0.15
             reasons.append("Inconsistent texture across regions")
         
         fake_score = min(fake_score, 0.95)
         
-        print(f"Local Edit Score: {fake_score:.2f}, Reasons: {reasons}")
-        
         return fake_score, " | ".join(reasons) if reasons else "No obvious manipulation detected"
         
     except Exception as e:
-        print(f"Local edits detection error: {e}")
         return 0.35, "Local edit analysis failed"
-# ==================== LAYER 3: ENHANCED NOISE ANALYSIS ====================
+
+# ==================== LAYER 3: NOISE ANALYSIS ====================
 def layer3_noise_analysis(image_file):
-    """Enhanced noise analysis for AI detection"""
     try:
         img = Image.open(image_file).convert('RGB')
         img_array = np.array(img)
         
-        # Convert to grayscale
         gray = np.dot(img_array[...,:3], [0.299, 0.587, 0.114])
         
-        # 1. Noise variance
         noise_var = np.var(gray)
         
-        if noise_var < 35:
+        if noise_var < 30:
             noise_score = 0.8
             reason_noise = "Very low noise (AI generation likely)"
-        elif noise_var < 60:
+        elif noise_var < 50:
             noise_score = 0.5
             reason_noise = "Low noise variance (suspicious)"
         elif noise_var > 130:
@@ -274,7 +232,6 @@ def layer3_noise_analysis(image_file):
             noise_score = 0.2
             reason_noise = "Normal noise level"
         
-        # 2. Frequency analysis
         f_transform = fft2(gray)
         f_shift = np.fft.fftshift(f_transform)
         magnitude = np.abs(f_shift)
@@ -287,15 +244,14 @@ def layer3_noise_analysis(image_file):
         
         if center_magnitude > total_magnitude * 2.0:
             noise_score = max(noise_score, 0.7)
-            reason_noise += " | Grid artifacts (GAN/AI detected)"
+            reason_noise += " | Grid artifacts detected"
         
         return noise_score, reason_noise
     except Exception as e:
         return 0.3, "Noise analysis failed"
 
-# ==================== LAYER 4: METADATA & FORENSICS ====================
+# ==================== LAYER 4: METADATA ANALYSIS ====================
 def layer4_metadata_analysis(image_file):
-    """Enhanced metadata analysis"""
     fake_score = 0.2
     reasoning = []
     
@@ -325,44 +281,35 @@ def layer4_metadata_analysis(image_file):
     except Exception as e:
         return 0.2, "Metadata analysis failed"
 
-# ==================== IMAGE REASONING WITH SUGGESTIONS ====================
+# ==================== IMAGE REASONING & SUGGESTIONS ====================
 def generate_image_reasoning_and_suggestions(result, layer_scores):
-    """Generate image reasoning and suggestions"""
     reasoning = []
     suggestions = []
     
-    if layer_scores.get('Reality Defender (Face)', 0) > 0.65:
-        reasoning.append("🔴 Face/Deepfake manipulation detected")
-        suggestions.append("✓ The face in this image appears manipulated")
-    elif layer_scores.get('Reality Defender (Face)', 0) > 0.5:
-        reasoning.append("🟠 Suspicious face patterns detected")
+    fake_score = result['fake_score']
+    verdict = result['class']
     
-    if layer_scores.get('Local Edit Detection', 0) > 0.60:
-        reasoning.append("🔴 Local editing detected (possible clothes/background change)")
-        suggestions.append("✓ The image shows signs of digital manipulation")
+    if verdict == 'FAKE':
+        reasoning.append(f"🔴 VERDICT: FAKE IMAGE")
+        suggestions.append("🚨 Do NOT share this image without verification")
         suggestions.append("✓ Try reverse image search on Google Images")
-    elif layer_scores.get('Local Edit Detection', 0) > 0.45:
-        reasoning.append("🟠 Some editing artifacts present")
-    
-    if layer_scores.get('AI/Noise Detection', 0) > 0.65:
-        reasoning.append("🔴 AI generation artifacts detected")
-        suggestions.append("✓ This image may be AI-generated, not a real photo")
-    
-    if result['class'] == 'FAKE':
-        suggestions.append("🚨 Do NOT trust or share this image without verification")
-        suggestions.append("✓ Verify the image source through reputable news outlets")
-    elif result['class'] == 'SUSPICIOUS':
-        suggestions.append("⚠️ Be cautious - image shows suspicious characteristics")
-        suggestions.append("✓ Verify before sharing on social media")
+    elif verdict == 'SUSPICIOUS':
+        reasoning.append(f"🟠 VERDICT: SUSPICIOUS")
+        suggestions.append("⚠️ Be cautious - verify before sharing")
     else:
+        reasoning.append(f"🟢 VERDICT: REAL IMAGE")
         suggestions.append("✅ Image appears authentic")
-        suggestions.append("✓ Still verify the context of the image")
     
-    return " | ".join(reasoning) if reasoning else "🟢 No major manipulation detected", suggestions
-# ==================== IMAGE ANALYSIS ====================
+    if layer_scores.get('Local Edit Detection', 0) > 0.50:
+        reasoning.append("🔍 Local editing detected")
+    
+    if layer_scores.get('AI/Noise Detection', 0) > 0.60:
+        reasoning.append("🔍 AI generation artifacts detected")
+    
+    return " | ".join(reasoning), suggestions
+
+# ==================== MAIN IMAGE ANALYSIS ====================
 def analyze_image_complete(image_file, api_key):
-    """4-layer ensemble analysis - FIXED REAL DETECTION"""
-    
     image_file.seek(0)
     rd_score = layer1_reality_defender(image_file, api_key) if api_key else 0.5
     
@@ -378,13 +325,12 @@ def analyze_image_complete(image_file, api_key):
     image_file.seek(0)
     meta_score, meta_reason = layer4_metadata_analysis(image_file)
     
-    # Calculate final score
-    final_score = (rd_score * 0.20) + (local_edit_score * 0.35) + (ela_score * 0.20) + (noise_score * 0.15) + (meta_score * 0.10)
+    final_score = (rd_score * 0.15) + (local_edit_score * 0.45) + (ela_score * 0.20) + (noise_score * 0.15) + (meta_score * 0.05)
     
-    # UPDATED THRESHOLDS - Real images ke liye higher
-    if local_edit_score > 0.60 or rd_score > 0.70 or ela_score > 0.65:
+    # FINAL BALANCED THRESHOLDS
+    if local_edit_score > 0.50 or rd_score > 0.60 or final_score > 0.55:
         verdict = "FAKE"
-    elif final_score > 0.52:
+    elif final_score > 0.40:
         verdict = "SUSPICIOUS"
     else:
         verdict = "REAL"
@@ -407,8 +353,8 @@ def analyze_image_complete(image_file, api_key):
         'meta_reason': meta_reason,
         'local_edit_reason': local_edit_reason
     }
+
 def analyze_image_basic(image_file):
-    """Basic analysis fallback"""
     try:
         img = Image.open(image_file)
         img_array = np.array(img)
@@ -427,9 +373,6 @@ def analyze_image_basic(image_file):
             if avg_std < 35:
                 fake_score += 0.35
                 reasoning.append("Too smooth (AI generation)")
-            elif avg_std > 130:
-                fake_score += 0.2
-                reasoning.append("Too noisy (compressed)")
         
         file_size = len(image_file.getvalue())
         if file_size < 30000:
@@ -440,7 +383,7 @@ def analyze_image_basic(image_file):
         
         return {
             'fake_score': fake_score,
-            'class': 'FAKE' if fake_score > 0.65 else 'REAL',
+            'class': 'FAKE' if fake_score > 0.55 else 'REAL',
             'confidence': 0.7,
             'layer_scores': {'Basic Analysis': fake_score}
         }
@@ -451,10 +394,10 @@ def analyze_image_basic(image_file):
 def create_gauge_chart(score, title="Fake Score"):
     fig, ax = plt.subplots(figsize=(8, 3))
     
-    if score > 0.60:
+    if score > 0.55:
         color = '#e74c3c'
         status = "High Risk"
-    elif score > 0.45:
+    elif score > 0.40:
         color = '#f39c12'
         status = "Medium Risk"
     else:
@@ -474,6 +417,7 @@ def create_gauge_chart(score, title="Fake Score"):
     
     plt.tight_layout()
     return fig
+
 # ==================== STREAMLIT UI ====================
 st.set_page_config(page_title="Fake Content Detection", page_icon="🛡️", layout="wide")
 
@@ -483,7 +427,6 @@ st.markdown("*4-Layer Ensemble: Face + Local Edits + AI Artifacts + Metadata*")
 vectorizer, classifier = load_text_model()
 API_KEY = st.secrets.get("REALITY_DEFENDER_API_KEY", "")
 
-# Sidebar
 with st.sidebar:
     st.header("📊 System Status")
     
@@ -497,12 +440,11 @@ with st.sidebar:
     else:
         st.warning("⚠️ API: Basic mode (limited detection)")
     
-    st.success("✅ ELA: Ready (Local edits/clothes change)")
+    st.success("✅ ELA: Ready")
     st.success("✅ AI Detection: Ready")
 
 st.markdown("---")
 
-# Three Tabs
 tab1, tab2, tab3 = st.tabs(["📝 Text Analysis", "🖼️ Image Analysis", "🔗 Combined Analysis"])
 
 # ==================== TAB 1: TEXT ANALYSIS ====================
@@ -584,11 +526,9 @@ with tab2:
                         for layer, score in result['layer_scores'].items():
                             st.progress(score, text=f"{layer}: {score*100:.1f}%")
                     
-                    # Image suggestions
                     img_reasoning, img_suggestions = generate_image_reasoning_and_suggestions(result, result.get('layer_scores', {}))
                     st.info(f"🔍 {img_reasoning}")
                     
-                    # Local edit analysis
                     if 'local_edit_reason' in result:
                         st.caption(f"📝 Local Edit Analysis: {result['local_edit_reason']}")
                     
@@ -615,7 +555,6 @@ with tab3:
     
     if st.button("Analyze Both", type="primary"):
         if combined_text and combined_image:
-            # Text analysis
             if vectorizer and classifier:
                 processed = combined_text.lower()
                 processed = re.sub(r'[^a-zA-Z\s]', '', processed)
@@ -626,9 +565,8 @@ with tab3:
             else:
                 text_fake_score = 0.5
                 text_reasoning = "Text model not available"
-                text_suggestions = ["✓ Train text model first"]
+                text_suggestions = []
             
-            # Image analysis
             if API_KEY:
                 img_result = analyze_image_complete(combined_image, API_KEY)
             else:
@@ -636,13 +574,9 @@ with tab3:
             
             if img_result:
                 image_fake_score = img_result['fake_score']
-                image_reasoning, image_suggestions = generate_image_reasoning_and_suggestions(img_result, img_result.get('layer_scores', {}))
-                
-                # Combined score (weighted)
                 combined_score = (text_fake_score * 0.5) + (image_fake_score * 0.5)
                 
-                # Display results
-                if combined_score > 0.65:
+                if combined_score > 0.55:
                     st.error(f"## ⚠️ COMBINED VERDICT: FAKE")
                 else:
                     st.success(f"## ✅ COMBINED VERDICT: REAL")
@@ -656,17 +590,6 @@ with tab3:
                     st.metric("Combined Score", f"{combined_score*100:.1f}%")
                 
                 st.progress(combined_score)
-                
-                # Detailed breakdown
-                with st.expander("🔍 View Detailed Analysis"):
-                    st.info(f"**Text Analysis:** {text_reasoning}")
-                    st.info(f"**Image Analysis:** {image_reasoning}")
-                
-                # Combined suggestions
-                st.subheader("💡 Recommendations")
-                all_suggestions = set(text_suggestions + image_suggestions)
-                for s in all_suggestions:
-                    st.write(s)
         else:
             st.warning("Please provide both text and image for combined analysis")
 
