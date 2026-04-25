@@ -14,6 +14,9 @@ import io
 import requests
 import base64
 from scipy.fft import fft2
+import torch
+import torch.nn as nn
+from torchvision import transforms, models
 
 # ==================== TEXT MODEL LOAD ====================
 @st.cache_resource
@@ -154,6 +157,96 @@ def layer2_ela_analysis(image_file):
     except Exception as e:
         return 0.3, "ELA analysis failed"
 
+
+# ==================== RESNET18 + ELA DETECTION MODEL ====================
+class ResNet18ELA(nn.Module):
+    """ResNet18 model for tampering detection"""
+    def __init__(self):
+        super(ResNet18ELA, self).__init__()
+        self.resnet = models.resnet18(weights='IMAGENET1K_V1')
+        in_features = self.resnet.fc.in_features
+        self.resnet.fc = nn.Linear(in_features, 2)
+    
+    def forward(self, x):
+        return self.resnet(x)
+
+def generate_ela_image(image, quality=90):
+    """Generate Error Level Analysis image"""
+    temp_orig = io.BytesIO()
+    image.save(temp_orig, format='JPEG', quality=quality)
+    temp_orig.seek(0)
+    img_recompressed = Image.open(temp_orig)
+    
+    diff = ImageChops.difference(image, img_recompressed)
+    extrema = diff.getextrema()
+    max_diff = max([ex[1] for ex in extrema])
+    if max_diff == 0:
+        max_diff = 1
+    scale = 255.0 / max_diff
+    ela_img = Image.eval(diff, lambda px: px * scale)
+    
+    return ela_img
+
+def detect_local_edits_enhanced(image_file):
+    """Enhanced detection for clothes change and local edits"""
+    try:
+        img = Image.open(image_file).convert('RGB')
+        img_array = np.array(img)
+        
+        fake_score = 0.2
+        reasons = []
+        
+        # 1. Multi-quality ELA test
+        ela_scores = []
+        for quality in [95, 85, 75, 65]:
+            ela_img = generate_ela_image(img, quality=quality)
+            ela_array = np.array(ela_img)
+            ela_intensity = np.mean(ela_array) / 255.0
+            ela_scores.append(ela_intensity)
+        
+        avg_ela = np.mean(ela_scores)
+        ela_std = np.std(ela_scores)
+        
+        if ela_std > 0.15:
+            fake_score += 0.3
+            reasons.append("Inconsistent ELA across qualities (possible editing)")
+        elif avg_ela > 0.3:
+            fake_score += 0.25
+            reasons.append("High ELA intensity detected")
+        
+        # 2. Edge analysis
+        from scipy import ndimage
+        gray = np.dot(img_array[...,:3], [0.299, 0.587, 0.114])
+        edges = np.abs(ndimage.sobel(gray))
+        edge_density = np.mean(edges)
+        
+        if edge_density > 55:
+            fake_score += 0.15
+            reasons.append("Unnatural edge patterns")
+        
+        # 3. Texture consistency check
+        h, w = gray.shape
+        quadrants = [
+            gray[:h//2, :w//2],
+            gray[:h//2, w//2:],
+            gray[h//2:, :w//2],
+            gray[h//2:, w//2:]
+        ]
+        quadrant_vars = [np.var(q) for q in quadrants]
+        var_std = np.std(quadrant_vars)
+        
+        if var_std > 30:
+            fake_score += 0.2
+            reasons.append("Inconsistent texture across regions")
+        
+        fake_score = min(fake_score, 0.95)
+        
+        return fake_score, " | ".join(reasons) if reasons else "No local edits detected"
+        
+    except Exception as e:
+        print(f"Local edits detection error: {e}")
+        return 0.25, "Local edit analysis failed"
+
 # ==================== LAYER 3: ENHANCED NOISE ANALYSIS ====================
 def layer3_noise_analysis(image_file):
     """Enhanced noise analysis for AI detection"""
@@ -268,10 +361,14 @@ def generate_image_reasoning_and_suggestions(result, layer_scores):
 
 # ==================== IMAGE ANALYSIS ====================
 def analyze_image_complete(image_file, api_key):
-    """4-layer ensemble analysis"""
+    """4-layer ensemble analysis with enhanced local edit detection"""
     
     image_file.seek(0)
-    rd_score = layer1_reality_defender(image_file, api_key)
+    rd_score = layer1_reality_defender(image_file, api_key) if api_key else 0.5
+    
+    image_file.seek(0)
+    # NEW: Enhanced local edits detection
+    local_edit_score, local_edit_reason = detect_local_edits_enhanced(image_file)
     
     image_file.seek(0)
     ela_score, ela_reason = layer2_ela_analysis(image_file)
@@ -282,18 +379,20 @@ def analyze_image_complete(image_file, api_key):
     image_file.seek(0)
     meta_score, meta_reason = layer4_metadata_analysis(image_file)
     
-    final_score = (rd_score * 0.20) + (ela_score * 0.40) + (noise_score * 0.25) + (meta_score * 0.15)
+    # NEW WEIGHTS: Focus on local edit detection
+    final_score = (rd_score * 0.15) + (local_edit_score * 0.40) + (ela_score * 0.20) + (noise_score * 0.15) + (meta_score * 0.10)
     
-    if final_score > 0.45:
+    if final_score > 0.40:
         verdict = "FAKE"
-    elif final_score > 0.35:
+    elif final_score > 0.30:
         verdict = "SUSPICIOUS"
     else:
         verdict = "REAL"
     
     layer_scores = {
         'Reality Defender (Face)': rd_score,
-        'ELA (Local Edits/Clothes)': ela_score,
+        'Local Edit Detection': local_edit_score,
+        'ELA Analysis': ela_score,
         'AI/Noise Detection': noise_score,
         'Metadata': meta_score
     }
@@ -301,13 +400,13 @@ def analyze_image_complete(image_file, api_key):
     return {
         'fake_score': final_score,
         'class': verdict,
-        'confidence': min(0.95, 1 - abs(final_score - 0.4) * 1.5),
+        'confidence': min(0.95, 1 - abs(final_score - 0.35) * 1.2),
         'layer_scores': layer_scores,
         'ela_reason': ela_reason,
         'noise_reason': noise_reason,
-        'meta_reason': meta_reason
+        'meta_reason': meta_reason,
+        'local_edit_reason': local_edit_reason
     }
-
 def analyze_image_basic(image_file):
     """Basic analysis fallback"""
     try:
@@ -489,6 +588,10 @@ with tab2:
                     # Image suggestions
                     img_reasoning, img_suggestions = generate_image_reasoning_and_suggestions(result, result.get('layer_scores', {}))
                     st.info(f"🔍 {img_reasoning}")
+                    
+                    # 👇 YEH LINES ADD KI HAIN (Local Edit Analysis)
+                    if 'local_edit_reason' in result:
+                        st.caption(f"📝 Local Edit Analysis: {result['local_edit_reason']}")
                     
                     st.subheader("💡 Recommendations")
                     for s in img_suggestions:
