@@ -10,3 +10,4 @@ torchvision==0.15.2
 transformers==4.35.0
 huggingface-hub==0.16.4
 safetensors==0.4.0
+pip install requests pillow numpy opencv-python scipy streamlit
