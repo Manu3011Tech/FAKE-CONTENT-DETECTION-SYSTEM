@@ -363,7 +363,7 @@ def generate_image_reasoning_and_suggestions(result, layer_scores):
 
 # ==================== IMAGE ANALYSIS ====================
 def analyze_image_complete(image_file, api_key):
-    """4-layer ensemble analysis"""
+    """4-layer ensemble analysis - ACCURATE VERDICT"""
     
     image_file.seek(0)
     rd_score = layer1_reality_defender(image_file, api_key) if api_key else 0.5
@@ -380,7 +380,7 @@ def analyze_image_complete(image_file, api_key):
     image_file.seek(0)
     meta_score, meta_reason = layer4_metadata_analysis(image_file)
     
-    # Debug prints - check terminal for these values
+    # Debug prints
     print(f"=== DEBUG SCORES ===")
     print(f"RD Score: {rd_score:.2f}")
     print(f"Local Edit Score: {local_edit_score:.2f}")
@@ -388,15 +388,16 @@ def analyze_image_complete(image_file, api_key):
     print(f"Noise Score: {noise_score:.2f}")
     print(f"Meta Score: {meta_score:.2f}")
     
-    # Calculate final score - higher weight to local_edit_score
-    final_score = (rd_score * 0.15) + (local_edit_score * 0.45) + (ela_score * 0.20) + (noise_score * 0.15) + (meta_score * 0.05)
+    # Calculate final score
+    final_score = (rd_score * 0.20) + (local_edit_score * 0.35) + (ela_score * 0.20) + (noise_score * 0.15) + (meta_score * 0.10)
     
     print(f"Final Score: {final_score:.2f}")
     
-    # LOWER THRESHOLDS - so fake images get detected
-    if final_score > 0.48:
+    # ⭐⭐⭐ IMPORTANT - Verdict based on layer scores ⭐⭐⭐
+    # Agar koi bhi layer fake indicate kar rahi hai toh FAKE
+    if local_edit_score > 0.45 or rd_score > 0.55 or ela_score > 0.50:
         verdict = "FAKE"
-    elif final_score > 0.35:
+    elif final_score > 0.45:
         verdict = "SUSPICIOUS"
     else:
         verdict = "REAL"
