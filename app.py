@@ -303,7 +303,7 @@ def generate_image_reasoning_and_suggestions(result, layer_scores):
     if layer_scores.get('Local Edit Detection', 0) > 0.50:
         reasoning.append("🔍 Local editing detected")
     
-    if layer_scores.get('AI/Noise Detection', 0) > 0.60:
+    if layer_scores.get('AI/Noise Detection', 0) > 0.75:
         reasoning.append("🔍 AI generation artifacts detected")
     
     return " | ".join(reasoning), suggestions
