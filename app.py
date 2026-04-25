@@ -188,12 +188,12 @@ def generate_ela_image(image, quality=90):
     return ela_img
 
 def detect_local_edits_enhanced(image_file):
-    """Enhanced detection for clothes change and local edits"""
+    """Balanced detection for clothes change and local edits"""
     try:
         img = Image.open(image_file).convert('RGB')
         img_array = np.array(img)
         
-        fake_score = 0.2
+        fake_score = 0.1  # Lower base score
         reasons = []
         
         # 1. Multi-quality ELA test
@@ -207,11 +207,12 @@ def detect_local_edits_enhanced(image_file):
         avg_ela = np.mean(ela_scores)
         ela_std = np.std(ela_scores)
         
-        if ela_std > 0.15:
-            fake_score += 0.3
-            reasons.append("Inconsistent ELA across qualities (possible editing)")
-        elif avg_ela > 0.3:
+        # Higher thresholds to avoid false positives
+        if ela_std > 0.20:
             fake_score += 0.25
+            reasons.append("Inconsistent ELA across qualities")
+        elif avg_ela > 0.35:
+            fake_score += 0.20
             reasons.append("High ELA intensity detected")
         
         # 2. Edge analysis
@@ -220,7 +221,8 @@ def detect_local_edits_enhanced(image_file):
         edges = np.abs(ndimage.sobel(gray))
         edge_density = np.mean(edges)
         
-        if edge_density > 55:
+        # Higher threshold
+        if edge_density > 70:
             fake_score += 0.15
             reasons.append("Unnatural edge patterns")
         
@@ -235,8 +237,9 @@ def detect_local_edits_enhanced(image_file):
         quadrant_vars = [np.var(q) for q in quadrants]
         var_std = np.std(quadrant_vars)
         
-        if var_std > 30:
-            fake_score += 0.2
+        # Higher threshold
+        if var_std > 45:
+            fake_score += 0.15
             reasons.append("Inconsistent texture across regions")
         
         fake_score = min(fake_score, 0.95)
@@ -245,7 +248,7 @@ def detect_local_edits_enhanced(image_file):
         
     except Exception as e:
         print(f"Local edits detection error: {e}")
-        return 0.25, "Local edit analysis failed"
+        return 0.15, "Local edit analysis failed"
 
 # ==================== LAYER 3: ENHANCED NOISE ANALYSIS ====================
 def layer3_noise_analysis(image_file):
@@ -336,11 +339,11 @@ def generate_image_reasoning_and_suggestions(result, layer_scores):
     elif layer_scores.get('Reality Defender (Face)', 0) > 0.4:
         reasoning.append("🟠 Suspicious face patterns detected")
     
-    if layer_scores.get('ELA (Local Edits/Clothes)', 0) > 0.6:
+    if layer_scores.get('Local Edit Detection', 0) > 0.55:
         reasoning.append("🔴 Local editing detected (possible clothes/background change)")
         suggestions.append("✓ The image shows signs of digital manipulation")
         suggestions.append("✓ Try reverse image search on Google Images")
-    elif layer_scores.get('ELA (Local Edits/Clothes)', 0) > 0.4:
+    elif layer_scores.get('Local Edit Detection', 0) > 0.4:
         reasoning.append("🟠 Some editing artifacts present")
     
     if layer_scores.get('AI/Noise Detection', 0) > 0.6:
@@ -361,13 +364,12 @@ def generate_image_reasoning_and_suggestions(result, layer_scores):
 
 # ==================== IMAGE ANALYSIS ====================
 def analyze_image_complete(image_file, api_key):
-    """4-layer ensemble analysis with enhanced local edit detection"""
+    """4-layer ensemble analysis with balanced detection"""
     
     image_file.seek(0)
     rd_score = layer1_reality_defender(image_file, api_key) if api_key else 0.5
     
     image_file.seek(0)
-    # NEW: Enhanced local edits detection
     local_edit_score, local_edit_reason = detect_local_edits_enhanced(image_file)
     
     image_file.seek(0)
@@ -379,12 +381,13 @@ def analyze_image_complete(image_file, api_key):
     image_file.seek(0)
     meta_score, meta_reason = layer4_metadata_analysis(image_file)
     
-    # NEW WEIGHTS: Focus on local edit detection
-    final_score = (rd_score * 0.15) + (local_edit_score * 0.40) + (ela_score * 0.20) + (noise_score * 0.15) + (meta_score * 0.10)
+    # BALANCED WEIGHTS
+    final_score = (rd_score * 0.25) + (local_edit_score * 0.25) + (ela_score * 0.20) + (noise_score * 0.20) + (meta_score * 0.10)
     
-    if final_score > 0.40:
+    # HIGHER THRESHOLD to avoid false positives
+    if final_score > 0.55:
         verdict = "FAKE"
-    elif final_score > 0.30:
+    elif final_score > 0.45:
         verdict = "SUSPICIOUS"
     else:
         verdict = "REAL"
@@ -400,13 +403,14 @@ def analyze_image_complete(image_file, api_key):
     return {
         'fake_score': final_score,
         'class': verdict,
-        'confidence': min(0.95, 1 - abs(final_score - 0.35) * 1.2),
+        'confidence': min(0.95, max(0.5, 1 - abs(final_score - 0.5) * 1.5)),
         'layer_scores': layer_scores,
         'ela_reason': ela_reason,
         'noise_reason': noise_reason,
         'meta_reason': meta_reason,
         'local_edit_reason': local_edit_reason
     }
+
 def analyze_image_basic(image_file):
     """Basic analysis fallback"""
     try:
@@ -440,7 +444,7 @@ def analyze_image_basic(image_file):
         
         return {
             'fake_score': fake_score,
-            'class': 'FAKE' if fake_score > 0.45 else 'REAL',
+            'class': 'FAKE' if fake_score > 0.55 else 'REAL',  # Higher threshold
             'confidence': 0.7,
             'layer_scores': {'Basic Analysis': fake_score}
         }
@@ -451,10 +455,10 @@ def analyze_image_basic(image_file):
 def create_gauge_chart(score, title="Fake Score"):
     fig, ax = plt.subplots(figsize=(8, 3))
     
-    if score > 0.45:
+    if score > 0.55:
         color = '#e74c3c'
         status = "High Risk"
-    elif score > 0.35:
+    elif score > 0.45:
         color = '#f39c12'
         status = "Medium Risk"
     else:
@@ -466,7 +470,7 @@ def create_gauge_chart(score, title="Fake Score"):
     ax.set_xlim(0, 1)
     ax.set_ylim(-0.5, 0.5)
     ax.set_title(f"{title}: {score*100:.1f}%", fontsize=14, fontweight='bold')
-    ax.axvline(x=0.4, color='black', linestyle='--', alpha=0.5, label='Threshold')
+    ax.axvline(x=0.5, color='black', linestyle='--', alpha=0.5, label='Threshold')
     ax.set_yticks([])
     ax.legend(loc='upper right')
     ax.text(score, 0.4, f"{score*100:.0f}%", ha='center', fontsize=12, fontweight='bold')
@@ -589,7 +593,7 @@ with tab2:
                     img_reasoning, img_suggestions = generate_image_reasoning_and_suggestions(result, result.get('layer_scores', {}))
                     st.info(f"🔍 {img_reasoning}")
                     
-                    # 👇 YEH LINES ADD KI HAIN (Local Edit Analysis)
+                    # Local edit analysis
                     if 'local_edit_reason' in result:
                         st.caption(f"📝 Local Edit Analysis: {result['local_edit_reason']}")
                     
@@ -643,7 +647,7 @@ with tab3:
                 combined_score = (text_fake_score * 0.5) + (image_fake_score * 0.5)
                 
                 # Display results
-                if combined_score > 0.45:
+                if combined_score > 0.55:
                     st.error(f"## ⚠️ COMBINED VERDICT: FAKE")
                 else:
                     st.success(f"## ✅ COMBINED VERDICT: REAL")
