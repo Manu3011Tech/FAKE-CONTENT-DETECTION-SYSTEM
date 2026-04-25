@@ -188,12 +188,12 @@ def generate_ela_image(image, quality=90):
     return ela_img
 
 def detect_local_edits_enhanced(image_file):
-    """Very balanced detection - avoid false positives"""
+    """Balanced detection - not too sensitive, not too strict"""
     try:
         img = Image.open(image_file).convert('RGB')
         img_array = np.array(img)
         
-        fake_score = 0.05  # Even lower base score
+        fake_score = 0.10  # Middle ground base score
         reasons = []
         
         # 1. Multi-quality ELA test
@@ -207,12 +207,12 @@ def detect_local_edits_enhanced(image_file):
         avg_ela = np.mean(ela_scores)
         ela_std = np.std(ela_scores)
         
-        # Even higher thresholds
-        if ela_std > 0.25:
-            fake_score += 0.20
+        # Middle ground thresholds
+        if ela_std > 0.22:
+            fake_score += 0.22
             reasons.append("Inconsistent ELA across qualities")
-        elif avg_ela > 0.40:
-            fake_score += 0.15
+        elif avg_ela > 0.38:
+            fake_score += 0.18
             reasons.append("High ELA intensity detected")
         
         # 2. Edge analysis
@@ -221,8 +221,8 @@ def detect_local_edits_enhanced(image_file):
         edges = np.abs(ndimage.sobel(gray))
         edge_density = np.mean(edges)
         
-        if edge_density > 80:
-            fake_score += 0.10
+        if edge_density > 75:
+            fake_score += 0.12
             reasons.append("Unnatural edge patterns")
         
         # 3. Texture consistency check
@@ -236,8 +236,8 @@ def detect_local_edits_enhanced(image_file):
         quadrant_vars = [np.var(q) for q in quadrants]
         var_std = np.std(quadrant_vars)
         
-        if var_std > 60:
-            fake_score += 0.10
+        if var_std > 52:
+            fake_score += 0.12
             reasons.append("Inconsistent texture across regions")
         
         fake_score = min(fake_score, 0.95)
@@ -246,7 +246,7 @@ def detect_local_edits_enhanced(image_file):
         
     except Exception as e:
         print(f"Local edits detection error: {e}")
-        return 0.10, "Local edit analysis failed"
+        return 0.12, "Local edit analysis failed"
 
 # ==================== LAYER 3: ENHANCED NOISE ANALYSIS ====================
 def layer3_noise_analysis(image_file):
@@ -362,7 +362,7 @@ def generate_image_reasoning_and_suggestions(result, layer_scores):
 
 # ==================== IMAGE ANALYSIS ====================
 def analyze_image_complete(image_file, api_key):
-    """4-layer ensemble analysis with higher thresholds for real images"""
+    """4-layer ensemble analysis with balanced thresholds"""
     
     image_file.seek(0)
     rd_score = layer1_reality_defender(image_file, api_key) if api_key else 0.5
@@ -382,10 +382,10 @@ def analyze_image_complete(image_file, api_key):
     # BALANCED WEIGHTS
     final_score = (rd_score * 0.25) + (local_edit_score * 0.25) + (ela_score * 0.20) + (noise_score * 0.20) + (meta_score * 0.10)
     
-    # HIGHER THRESHOLDS for real images
-    if final_score > 0.65:
+    # BALANCED THRESHOLDS - Middle ground
+    if final_score > 0.60:
         verdict = "FAKE"
-    elif final_score > 0.55:
+    elif final_score > 0.45:
         verdict = "SUSPICIOUS"
     else:
         verdict = "REAL"
@@ -401,14 +401,13 @@ def analyze_image_complete(image_file, api_key):
     return {
         'fake_score': final_score,
         'class': verdict,
-        'confidence': min(0.95, max(0.5, 1 - abs(final_score - 0.5) * 1.2)),
+        'confidence': min(0.95, max(0.5, 1 - abs(final_score - 0.5) * 1.5)),
         'layer_scores': layer_scores,
         'ela_reason': ela_reason,
         'noise_reason': noise_reason,
         'meta_reason': meta_reason,
         'local_edit_reason': local_edit_reason
     }
-
 def analyze_image_basic(image_file):
     """Basic analysis fallback"""
     try:
@@ -453,10 +452,10 @@ def analyze_image_basic(image_file):
 def create_gauge_chart(score, title="Fake Score"):
     fig, ax = plt.subplots(figsize=(8, 3))
     
-    if score > 0.65:
+    if score > 0.60:
         color = '#e74c3c'
         status = "High Risk"
-    elif score > 0.55:
+    elif score > 0.45:
         color = '#f39c12'
         status = "Medium Risk"
     else:
@@ -476,7 +475,6 @@ def create_gauge_chart(score, title="Fake Score"):
     
     plt.tight_layout()
     return fig
-
 # ==================== STREAMLIT UI ====================
 st.set_page_config(page_title="Fake Content Detection", page_icon="🛡️", layout="wide")
 
