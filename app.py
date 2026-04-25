@@ -350,26 +350,24 @@ def generate_image_reasoning_and_suggestions(result, layer_scores):
         suggestions.append("✅ Image appears authentic")
         suggestions.append("✓ Still verify the context of the image")
     
-    # ===== LAYER-WISE DETAILS (Only show if significant) =====
-    # Only add layer details if score is high enough (avoid false positives)
+    # ===== LAYER-WISE DETAILS (Higher thresholds to avoid false positives) =====
+    # Face/Deepfake detection - only if significant
     if layer_scores.get('Reality Defender (Face)', 0) > 0.65:
         reasoning.append("🔍 Face/Deepfake analysis: Manipulation detected")
     elif layer_scores.get('Reality Defender (Face)', 0) > 0.55:
         reasoning.append("🔍 Face/Deepfake analysis: Suspicious patterns")
     
-    # Only show local edit detection if score > 0.60 (avoid false positives)
+    # Local edit detection - only if significant
     if layer_scores.get('Local Edit Detection', 0) > 0.60:
         reasoning.append("🔍 Local edit analysis: Digital manipulation detected")
     elif layer_scores.get('Local Edit Detection', 0) > 0.50:
         reasoning.append("🔍 Local edit analysis: Some editing artifacts")
     
-    # Only show AI detection if score > 0.65 (avoid false positives)
+    # 🔥 FIXED: AI detection - only show if score > 0.65 (was 0.35 - too low!)
     if layer_scores.get('AI/Noise Detection', 0) > 0.65:
         reasoning.append("🔍 AI analysis: AI generation artifacts detected")
     
     return " | ".join(reasoning) if reasoning else "🟢 No major manipulation detected", suggestions
-    
-    return " | ".join(reasoning) if reasoning else "No manipulation detected", suggestions
 # ==================== IMAGE ANALYSIS ====================
 def analyze_image_complete(image_file, api_key):
     """4-layer ensemble analysis - FIXED REAL DETECTION"""
