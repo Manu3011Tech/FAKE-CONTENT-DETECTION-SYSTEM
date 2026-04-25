@@ -328,40 +328,54 @@ def layer4_metadata_analysis(image_file):
 
 # ==================== IMAGE REASONING WITH SUGGESTIONS ====================
 def generate_image_reasoning_and_suggestions(result, layer_scores):
-    """Generate image reasoning and suggestions - ACCURATE"""
+    """Generate image reasoning and suggestions - BALANCED"""
     reasoning = []
     suggestions = []
     
     fake_score = result['fake_score']
+    local_edit_score = layer_scores.get('Local Edit Detection', 0)
+    ai_noise_score = layer_scores.get('AI/Noise Detection', 0)
+    rd_score = layer_scores.get('Reality Defender (Face)', 0)
+    ela_score = layer_scores.get('ELA Analysis', 0)
     
-    # Overall verdict based on actual class
+    # Overall reasoning based on actual scores
     if result['class'] == 'FAKE':
         reasoning.append(f"🔴 FAKE IMAGE DETECTED (Score: {fake_score*100:.1f}%)")
+    elif result['class'] == 'SUSPICIOUS':
+        reasoning.append(f"🟠 SUSPICIOUS IMAGE (Score: {fake_score*100:.1f}%)")
+    else:
+        reasoning.append(f"🟢 REAL IMAGE (Score: {fake_score*100:.1f}%)")
+    
+    # Layer-wise details - ALWAYS show if scores are high
+    if rd_score > 0.55:
+        reasoning.append("🔴 Face/Deepfake manipulation detected")
+    
+    if local_edit_score > 0.50:
+        reasoning.append("🔴 Local editing detected (possible clothes/background change)")
+    
+    if ai_noise_score > 0.55:
+        reasoning.append("🔴 AI generation artifacts detected")
+    
+    if ela_score > 0.50:
+        reasoning.append("🔴 Compression artifacts detected")
+    
+    # Suggestions based on verdict
+    if result['class'] == 'FAKE':
         suggestions.append("🚨 Do NOT share this image without verification")
         suggestions.append("✓ Try reverse image search on Google Images")
         suggestions.append("✓ Verify the image source through reputable news outlets")
+        if local_edit_score > 0.50:
+            suggestions.append("✓ The image shows signs of digital manipulation")
+        if rd_score > 0.55:
+            suggestions.append("✓ The face in this image appears manipulated")
+        if ai_noise_score > 0.55:
+            suggestions.append("✓ This image may be AI-generated")
     elif result['class'] == 'SUSPICIOUS':
-        reasoning.append(f"🟠 SUSPICIOUS IMAGE (Score: {fake_score*100:.1f}%)")
         suggestions.append("⚠️ Be cautious - image shows suspicious characteristics")
         suggestions.append("✓ Verify before sharing on social media")
     else:
-        reasoning.append(f"🟢 REAL IMAGE (Score: {fake_score*100:.1f}%)")
         suggestions.append("✅ Image appears authentic")
         suggestions.append("✓ Still verify the context of the image")
-    
-    # Only add manipulation-specific suggestions if the image is actually FAKE
-    if result['class'] == 'FAKE':
-        if layer_scores.get('Reality Defender (Face)', 0) > 0.60:
-            reasoning.append("🔴 Face/Deepfake manipulation detected")
-            suggestions.append("✓ The face in this image appears manipulated")
-        
-        if layer_scores.get('Local Edit Detection', 0) > 0.55:
-            reasoning.append("🔴 Local editing detected (possible clothes/background change)")
-            suggestions.append("✓ The image shows signs of digital manipulation")
-        
-        if layer_scores.get('AI/Noise Detection', 0) > 0.60:
-            reasoning.append("🔴 AI generation artifacts detected")
-            suggestions.append("✓ This image may be AI-generated, not a real photo")
     
     return " | ".join(reasoning) if reasoning else "No manipulation detected", suggestions
 # ==================== IMAGE ANALYSIS ====================
