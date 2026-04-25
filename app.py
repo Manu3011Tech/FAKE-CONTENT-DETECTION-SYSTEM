@@ -188,12 +188,12 @@ def generate_ela_image(image, quality=90):
     return ela_img
 
 def detect_local_edits_enhanced(image_file):
-    """Balanced detection - not too sensitive, not too strict"""
+    """Slightly more sensitive detection for fake content"""
     try:
         img = Image.open(image_file).convert('RGB')
         img_array = np.array(img)
         
-        fake_score = 0.10  # Middle ground base score
+        fake_score = 0.15  # Higher base score
         reasons = []
         
         # 1. Multi-quality ELA test
@@ -207,12 +207,11 @@ def detect_local_edits_enhanced(image_file):
         avg_ela = np.mean(ela_scores)
         ela_std = np.std(ela_scores)
         
-        # Middle ground thresholds
-        if ela_std > 0.22:
+        if ela_std > 0.18:  # More sensitive (was 0.22)
+            fake_score += 0.28
+            reasons.append("Inconsistent ELA across qualities (possible editing)")
+        elif avg_ela > 0.32:  # More sensitive (was 0.38)
             fake_score += 0.22
-            reasons.append("Inconsistent ELA across qualities")
-        elif avg_ela > 0.38:
-            fake_score += 0.18
             reasons.append("High ELA intensity detected")
         
         # 2. Edge analysis
@@ -221,8 +220,8 @@ def detect_local_edits_enhanced(image_file):
         edges = np.abs(ndimage.sobel(gray))
         edge_density = np.mean(edges)
         
-        if edge_density > 75:
-            fake_score += 0.12
+        if edge_density > 65:  # More sensitive (was 75)
+            fake_score += 0.15
             reasons.append("Unnatural edge patterns")
         
         # 3. Texture consistency check
@@ -236,18 +235,17 @@ def detect_local_edits_enhanced(image_file):
         quadrant_vars = [np.var(q) for q in quadrants]
         var_std = np.std(quadrant_vars)
         
-        if var_std > 52:
-            fake_score += 0.12
+        if var_std > 45:  # More sensitive (was 52)
+            fake_score += 0.15
             reasons.append("Inconsistent texture across regions")
         
         fake_score = min(fake_score, 0.95)
         
-        return fake_score, " | ".join(reasons) if reasons else "No local edits detected"
+        return fake_score, " | ".join(reasons) if reasons else "No obvious manipulation detected"
         
     except Exception as e:
         print(f"Local edits detection error: {e}")
-        return 0.12, "Local edit analysis failed"
-
+        return 0.20, "Local edit analysis failed"
 # ==================== LAYER 3: ENHANCED NOISE ANALYSIS ====================
 def layer3_noise_analysis(image_file):
     """Enhanced noise analysis for AI detection"""
@@ -379,13 +377,22 @@ def analyze_image_complete(image_file, api_key):
     image_file.seek(0)
     meta_score, meta_reason = layer4_metadata_analysis(image_file)
     
-    # BALANCED WEIGHTS
-    final_score = (rd_score * 0.25) + (local_edit_score * 0.25) + (ela_score * 0.20) + (noise_score * 0.20) + (meta_score * 0.10)
+    # DEBUG: Print scores to see what's happening
+    print(f"RD Score: {rd_score:.2f}")
+    print(f"Local Edit Score: {local_edit_score:.2f}")
+    print(f"ELA Score: {ela_score:.2f}")
+    print(f"Noise Score: {noise_score:.2f}")
+    print(f"Meta Score: {meta_score:.2f}")
     
-    # BALANCED THRESHOLDS - Middle ground
-    if final_score > 0.60:
+    # Calculate weighted score
+    final_score = (rd_score * 0.20) + (local_edit_score * 0.35) + (ela_score * 0.25) + (noise_score * 0.15) + (meta_score * 0.05)
+    
+    print(f"Final Score: {final_score:.2f}")
+    
+    # THRESHOLDS
+    if final_score > 0.52:
         verdict = "FAKE"
-    elif final_score > 0.45:
+    elif final_score > 0.40:
         verdict = "SUSPICIOUS"
     else:
         verdict = "REAL"
