@@ -363,7 +363,7 @@ def generate_image_reasoning_and_suggestions(result, layer_scores):
 
 # ==================== IMAGE ANALYSIS ====================
 def analyze_image_complete(image_file, api_key):
-    """4-layer ensemble analysis - FIXED for real images"""
+    """4-layer ensemble analysis - FIXED REAL DETECTION"""
     
     image_file.seek(0)
     rd_score = layer1_reality_defender(image_file, api_key) if api_key else 0.5
@@ -380,16 +380,29 @@ def analyze_image_complete(image_file, api_key):
     image_file.seek(0)
     meta_score, meta_reason = layer4_metadata_analysis(image_file)
     
+    # Debug prints (optional - terminal mein dikhega)
+    print(f"=== DEBUG SCORES ===")
+    print(f"RD Score: {rd_score:.2f}")
+    print(f"Local Edit Score: {local_edit_score:.2f}")
+    print(f"ELA Score: {ela_score:.2f}")
+    print(f"Noise Score: {noise_score:.2f}")
+    print(f"Meta Score: {meta_score:.2f}")
+    
     # Calculate final score
     final_score = (rd_score * 0.20) + (local_edit_score * 0.35) + (ela_score * 0.20) + (noise_score * 0.15) + (meta_score * 0.10)
     
-    # HIGHER THRESHOLDS - so real images don't become suspicious
-    if local_edit_score > 0.55 or rd_score > 0.65 or ela_score > 0.60:
+    print(f"Final Score: {final_score:.2f}")
+    
+    # 🔥 UPDATED THRESHOLDS - Real images ke liye higher
+    if local_edit_score > 0.60 or rd_score > 0.70 or ela_score > 0.65:
         verdict = "FAKE"
-    elif final_score > 0.50:
+    elif final_score > 0.52:
         verdict = "SUSPICIOUS"
     else:
         verdict = "REAL"
+    
+    print(f"Verdict: {verdict}")
+    print(f"==================")
     
     layer_scores = {
         'Reality Defender (Face)': rd_score,
@@ -407,7 +420,7 @@ def analyze_image_complete(image_file, api_key):
         'ela_reason': ela_reason,
         'noise_reason': noise_reason,
         'meta_reason': meta_reason,
-        'local_edit_reason': local_edit_reason
+        'local_edit_reason': local_edit_reaction
     }
 def analyze_image_basic(image_file):
     """Basic analysis fallback"""
