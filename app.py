@@ -1,6 +1,6 @@
 """
 Fake News Detection System - 4 Layer Ensemble Detection
-Detects: Face swap, Deepfakes, AI images, Local edits, Clothes change
+No OpenCV - Uses PIL and numpy only
 """
 
 import streamlit as st
@@ -13,7 +13,6 @@ from PIL import Image, ImageChops
 import io
 import requests
 import base64
-import cv2
 from scipy.fft import fft2
 from scipy.stats import entropy
 
@@ -23,7 +22,6 @@ def layer1_reality_defender(image_file, api_key):
     try:
         image_bytes = image_file.getvalue()
         
-        # Step 1: Get signed URL
         signed_response = requests.post(
             "https://api.prd.realitydefender.xyz/api/files/aws-presigned",
             json={"fileName": "upload.jpg", "fileSize": len(image_bytes)},
@@ -41,10 +39,8 @@ def layer1_reality_defender(image_file, api_key):
         if not signed_url:
             return None, 0.5
         
-        # Step 2: Upload
         requests.put(signed_url, data=image_bytes, headers={"Content-Type": "image/jpeg"}, timeout=30)
         
-        # Step 3: Get results
         result_response = requests.get(
             f"https://api.prd.realitydefender.xyz/api/media/users/{request_id}",
             headers={"X-API-KEY": api_key, "Content-Type": "application/json"},
@@ -54,7 +50,6 @@ def layer1_reality_defender(image_file, api_key):
         if result_response.status_code == 200:
             result = result_response.json()
             fake_score = result.get('fake_probability', 0.5)
-            confidence = result.get('confidence', 0.5)
             return result, fake_score
         
         return None, 0.5
@@ -70,7 +65,6 @@ def layer2_ela_analysis(image_file):
     try:
         img = Image.open(image_file).convert('RGB')
         
-        # Save at different quality levels
         quality_high = io.BytesIO()
         quality_low = io.BytesIO()
         
@@ -80,13 +74,10 @@ def layer2_ela_analysis(image_file):
         img_high = Image.open(quality_high)
         img_low = Image.open(quality_low)
         
-        # Calculate difference
         diff = ImageChops.difference(img_high, img_low)
         diff_array = np.array(diff)
         
-        ela_score = np.mean(diff_array) / 255.0  # Normalize to 0-1
-        
-        # Higher ELA score = more likely manipulated
+        ela_score = np.mean(diff_array) / 255.0
         fake_score = min(ela_score * 1.5, 0.95)
         
         return fake_score, f"ELA score: {ela_score:.2%}"
@@ -103,17 +94,16 @@ def layer3_noise_analysis(image_file):
         img = Image.open(image_file).convert('RGB')
         img_array = np.array(img)
         
-        # Convert to grayscale
-        gray = cv2.cvtColor(img_array, cv2.COLOR_RGB2GRAY)
+        # Convert to grayscale manually (RGB to grayscale)
+        gray = np.dot(img_array[...,:3], [0.299, 0.587, 0.114])
         
         # 1. Noise variance check
         noise_var = np.var(gray)
-        noise_score = 0
         
-        if noise_var < 30:  # Too smooth - AI generated
+        if noise_var < 30:
             noise_score = 0.7
             reason_noise = "Low noise variance (AI generation)"
-        elif noise_var > 120:  # Too noisy - compressed/manipulated
+        elif noise_var > 120:
             noise_score = 0.5
             reason_noise = "High noise variance (compression artifacts)"
         else:
@@ -125,18 +115,22 @@ def layer3_noise_analysis(image_file):
         f_shift = np.fft.fftshift(f_transform)
         magnitude = np.abs(f_shift)
         
-        # Check for grid artifacts (GAN artifacts)
-        center_region = magnitude[100:150, 100:150]
-        grid_artifact = np.mean(center_region) / np.mean(magnitude)
+        h, w = gray.shape
+        center_h, center_w = h // 2, w // 2
+        center_size = 50
         
-        if grid_artifact > 2.5:
+        center_region = magnitude[center_h-center_size:center_h+center_size, 
+                                   center_w-center_size:center_w+center_size]
+        total_magnitude = np.mean(magnitude)
+        center_magnitude = np.mean(center_region)
+        
+        if center_magnitude > total_magnitude * 2.5:
             frequency_score = 0.7
             reason_freq = "Grid artifacts detected (GAN/AI)"
         else:
             frequency_score = 0.2
             reason_freq = "Normal frequency pattern"
         
-        # Combined score
         fake_score = (noise_score + frequency_score) / 2
         
         return fake_score, f"{reason_noise} | {reason_freq}"
@@ -155,7 +149,6 @@ def layer4_metadata_analysis(image_file):
     try:
         img = Image.open(image_file)
         
-        # Check image dimensions
         width, height = img.size
         aspect = width / height
         
@@ -163,13 +156,11 @@ def layer4_metadata_analysis(image_file):
             fake_score += 0.15
             reasoning.append("Unusual aspect ratio")
         
-        # Check file size (very small images are suspicious)
         file_size = len(image_file.getvalue())
-        if file_size < 30000:  # Less than 30KB
+        if file_size < 30000:
             fake_score += 0.2
             reasoning.append("Very small file size (possible compression)")
         
-        # Check resolution
         if width > 4000 or height > 4000:
             fake_score += 0.1
             reasoning.append("Very high resolution (possible upscaling)")
@@ -187,63 +178,43 @@ def layer4_metadata_analysis(image_file):
 def analyze_image_complete(image_file, api_key):
     """4-layer ensemble analysis"""
     
-    # Layer 1: Reality Defender (Face/Deepfake detection)
+    image_file.seek(0)
     rd_result, rd_score = layer1_reality_defender(image_file, api_key)
     
-    # Need to reset file pointer for other layers
     image_file.seek(0)
-    
-    # Layer 2: ELA (Local edits, Photoshop)
     ela_score, ela_reason = layer2_ela_analysis(image_file)
     
     image_file.seek(0)
-    
-    # Layer 3: Noise analysis (AI artifacts)
     noise_score, noise_reason = layer3_noise_analysis(image_file)
     
     image_file.seek(0)
-    
-    # Layer 4: Metadata
     meta_score, meta_reason = layer4_metadata_analysis(image_file)
     
-    # Weighted final score (weights based on effectiveness)
-    # Layer 1: 30% (good for faces), Layer 2: 30% (good for local edits)
-    # Layer 3: 25% (good for AI), Layer 4: 15% (supporting)
     final_score = (rd_score * 0.30) + (ela_score * 0.30) + (noise_score * 0.25) + (meta_score * 0.15)
     
-    # Generate comprehensive reasoning
     reasoning = []
     
     if rd_score > 0.6:
-        reasoning.append(f"🔴 Reality Defender: High probability of face manipulation ({rd_score:.0%})")
+        reasoning.append(f"🔴 Reality Defender: Face manipulation detected ({rd_score:.0%})")
     elif rd_score > 0.4:
-        reasoning.append(f"🟠 Reality Defender: Suspicious patterns detected ({rd_score:.0%})")
+        reasoning.append(f"🟠 Reality Defender: Suspicious patterns ({rd_score:.0%})")
     else:
-        reasoning.append(f"🟢 Reality Defender: No face manipulation detected")
+        reasoning.append(f"🟢 Reality Defender: No face manipulation")
     
     if ela_score > 0.6:
-        reasoning.append(f"🔴 ELA Analysis: Strong evidence of local editing ({ela_score:.0%})")
-        reasoning.append("   → Possible clothes change, object removal, or Photoshop")
+        reasoning.append(f"🔴 ELA: Local editing detected ({ela_score:.0%}) - Possible clothes change")
     elif ela_score > 0.4:
-        reasoning.append(f"🟠 ELA Analysis: Some editing artifacts detected")
+        reasoning.append(f"🟠 ELA: Some editing artifacts")
     
     if noise_score > 0.6:
-        reasoning.append(f"🔴 AI Detection: AI generation artifacts found ({noise_score:.0%})")
-    elif noise_score > 0.4:
-        reasoning.append(f"🟠 AI Detection: Suspicious noise patterns")
+        reasoning.append(f"🔴 AI Detection: AI artifacts found ({noise_score:.0%})")
     
     if final_score > 0.6:
         verdict = "FAKE"
-        verdict_icon = "⚠️"
-        color = "red"
     elif final_score > 0.4:
         verdict = "SUSPICIOUS"
-        verdict_icon = "⚠️"
-        color = "orange"
     else:
         verdict = "REAL"
-        verdict_icon = "✅"
-        color = "green"
     
     return {
         'fake_score': final_score,
@@ -255,17 +226,11 @@ def analyze_image_complete(image_file, api_key):
             'ELA (Local edits)': ela_score,
             'Noise/AI Detection': noise_score,
             'Metadata': meta_score
-        },
-        'details': {
-            'rd_reason': "",
-            'ela_reason': ela_reason,
-            'noise_reason': noise_reason,
-            'meta_reason': meta_reason
         }
     }
 
 
-# ==================== FALLBACK: BASIC ANALYSIS ====================
+# ==================== FALLBACK ANALYSIS ====================
 def analyze_image_basic(image_file):
     """Basic analysis when API not available"""
     try:
@@ -305,7 +270,7 @@ def analyze_image_basic(image_file):
         return None
 
 
-# ==================== TEXT ANALYSIS (SAME AS BEFORE) ====================
+# ==================== TEXT ANALYSIS ====================
 @st.cache_resource
 def load_text_model():
     model_path = 'models/text_model.pkl'
@@ -370,18 +335,16 @@ def create_gauge_chart(score, title="Fake Score"):
 
 
 # ==================== STREAMLIT UI ====================
-st.set_page_config(page_title="Fake News Detector - 4 Layer Detection", page_icon="🛡️", layout="wide")
+st.set_page_config(page_title="Fake Content Detection", page_icon="🛡️", layout="wide")
 
-st.title("🛡️ Fake News Detection System")
-st.markdown("*4-Layer Ensemble Detection: Face + Local Edits + AI Artifacts + Metadata*")
+st.title("🛡️ Fake Content Detection System")
+st.markdown("*4-Layer Ensemble: Face + Local Edits + AI Artifacts + Metadata*")
 
-# Load models
 vectorizer, classifier = load_text_model()
 API_KEY = st.secrets.get("REALITY_DEFENDER_API_KEY", "")
 
-# Sidebar
 with st.sidebar:
-    st.header("📊 System Status")
+    st.header("System Status")
     
     if vectorizer and classifier:
         st.success("✅ Text Model: Ready")
@@ -391,26 +354,14 @@ with st.sidebar:
     if API_KEY:
         st.success("✅ Reality Defender API: Configured")
     else:
-        st.warning("⚠️ Reality Defender API: Not configured")
+        st.warning("⚠️ API: Not configured (using basic mode)")
     
-    st.success("✅ ELA Analysis: Ready (Local edits)")
-    st.success("✅ Noise Analysis: Ready (AI artifacts)")
-    st.success("✅ Metadata: Ready")
-    
-    st.markdown("---")
-    st.header("📌 How It Works")
-    st.markdown("""
-    **4-Layer Ensemble:**
-    1. **Reality Defender** - Face swap, Deepfake
-    2. **ELA** - Photoshop, Clothes change, Local edits
-    3. **AI Detection** - GAN artifacts, Noise patterns
-    4. **Metadata** - File integrity, Dimensions
-    """)
+    st.success("✅ ELA: Ready (Local edits)")
+    st.success("✅ AI Detection: Ready")
 
-# Tabs
-tab1, tab2, tab3 = st.tabs(["📝 Text Analysis", "🖼️ Image Analysis", "🔗 Combined Analysis"])
+tab1, tab2 = st.tabs(["📝 Text Analysis", "🖼️ Image Analysis"])
 
-# ==================== TAB 1: TEXT ANALYSIS ====================
+# Text Analysis Tab
 with tab1:
     st.header("Analyze News Article")
     
@@ -434,7 +385,7 @@ with tab1:
             plt.close()
             st.info(generate_text_reasoning(news_text, fake_score))
 
-# ==================== TAB 2: IMAGE ANALYSIS ====================
+# Image Analysis Tab
 with tab2:
     st.header("Analyze Image - 4 Layer Detection")
     st.caption("Detects: Face swap | Deepfake | Clothes change | AI generated | Photoshop")
@@ -442,10 +393,7 @@ with tab2:
     uploaded_image = st.file_uploader("Choose an image...", type=['jpg', 'jpeg', 'png', 'webp'])
     
     if uploaded_image:
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.image(uploaded_image, caption="Uploaded Image", use_column_width=True)
+        st.image(uploaded_image, caption="Uploaded Image", use_column_width=True)
         
         if st.button("Analyze Image", type="primary"):
             with st.spinner("Analyzing with 4-layer ensemble..."):
@@ -455,13 +403,12 @@ with tab2:
                     result = analyze_image_basic(uploaded_image)
                 
                 if result:
-                    with col2:
-                        if result['class'] == 'FAKE':
-                            st.error(f"## {result['class']} IMAGE DETECTED")
-                        elif result['class'] == 'SUSPICIOUS':
-                            st.warning(f"## {result['class']} IMAGE")
-                        else:
-                            st.success(f"## {result['class']} IMAGE")
+                    if result['class'] == 'FAKE':
+                        st.error(f"## {result['class']} IMAGE DETECTED")
+                    elif result['class'] == 'SUSPICIOUS':
+                        st.warning(f"## {result['class']} IMAGE")
+                    else:
+                        st.success(f"## {result['class']} IMAGE")
                     
                     st.metric("Final Fake Score", f"{result['fake_score']*100:.1f}%")
                     st.metric("Confidence", f"{result['confidence']*100:.1f}%")
@@ -469,29 +416,12 @@ with tab2:
                     st.pyplot(create_gauge_chart(result['fake_score'], "Overall Fake Score"))
                     plt.close()
                     
-                    # Show layer scores
                     with st.expander("📊 Layer-wise Analysis"):
                         if 'layer_scores' in result:
                             for layer, score in result['layer_scores'].items():
                                 st.progress(score, text=f"{layer}: {score*100:.1f}%")
                     
-                    st.subheader("Detailed Reasoning")
                     st.info(result['reasoning'])
 
-# ==================== TAB 3: COMBINED ANALYSIS ====================
-with tab3:
-    st.header("Text + Image Combined Analysis")
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        combined_text = st.text_area("News text:", height=150)
-    
-    with col2:
-        combined_image = st.file_uploader("Associated image:", type=['jpg', 'jpeg', 'png'], key="combined")
-        if combined_image:
-            st.image(combined_image, use_column_width=True)
-    
-    if st.button("Analyze Both", type="primary"):
-        # Combined logic here
-        st.info("Combined analysis uses weighted scores from both text and image")
+st.markdown("---")
+st.markdown("🛡️ **Fake Content Detection System** | 4-Layer Ensemble")
