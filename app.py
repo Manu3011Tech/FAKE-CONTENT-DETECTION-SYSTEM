@@ -328,7 +328,7 @@ def layer4_metadata_analysis(image_file):
 
 # ==================== IMAGE REASONING WITH SUGGESTIONS ====================
 def generate_image_reasoning_and_suggestions(result, layer_scores):
-    """Generate image reasoning and suggestions - HIGHER THRESHOLDS"""
+    """Generate image reasoning and suggestions - BALANCED"""
     reasoning = []
     suggestions = []
     
@@ -346,29 +346,28 @@ def generate_image_reasoning_and_suggestions(result, layer_scores):
     else:
         reasoning.append(f"🟢 REAL IMAGE (Score: {fake_score*100:.1f}%)")
     
-    # HIGHER THRESHOLDS - so real images don't show fake alerts
-    if rd_score > 0.70:
+    # Layer-wise details - ALWAYS show if scores are high
+      if rd_score > 0.65:
         reasoning.append("🔴 Face/Deepfake manipulation detected")
     
-    if local_edit_score > 0.65:
+    if local_edit_score > 0.60:
         reasoning.append("🔴 Local editing detected (possible clothes/background change)")
     
-    if ai_noise_score > 0.70:
+    if ai_noise_score > 0.65:
         reasoning.append("🔴 AI generation artifacts detected")
     
-    if ela_score > 0.65:
+    if ela_score > 0.60:
         reasoning.append("🔴 Compression artifacts detected")
-    
     # Suggestions based on verdict
     if result['class'] == 'FAKE':
         suggestions.append("🚨 Do NOT share this image without verification")
         suggestions.append("✓ Try reverse image search on Google Images")
         suggestions.append("✓ Verify the image source through reputable news outlets")
-        if local_edit_score > 0.65:
+        if local_edit_score > 0.50:
             suggestions.append("✓ The image shows signs of digital manipulation")
-        if rd_score > 0.70:
+        if rd_score > 0.55:
             suggestions.append("✓ The face in this image appears manipulated")
-        if ai_noise_score > 0.70:
+        if ai_noise_score > 0.55:
             suggestions.append("✓ This image may be AI-generated")
     elif result['class'] == 'SUSPICIOUS':
         suggestions.append("⚠️ Be cautious - image shows suspicious characteristics")
