@@ -379,29 +379,16 @@ def analyze_image_complete(image_file, api_key):
     image_file.seek(0)
     meta_score, meta_reason = layer4_metadata_analysis(image_file)
     
-    # Debug prints (optional - terminal mein dikhega)
-    print(f"=== DEBUG SCORES ===")
-    print(f"RD Score: {rd_score:.2f}")
-    print(f"Local Edit Score: {local_edit_score:.2f}")
-    print(f"ELA Score: {ela_score:.2f}")
-    print(f"Noise Score: {noise_score:.2f}")
-    print(f"Meta Score: {meta_score:.2f}")
-    
     # Calculate final score
     final_score = (rd_score * 0.20) + (local_edit_score * 0.35) + (ela_score * 0.20) + (noise_score * 0.15) + (meta_score * 0.10)
     
-    print(f"Final Score: {final_score:.2f}")
-    
-    # 🔥 UPDATED THRESHOLDS - Real images ke liye higher
+    # UPDATED THRESHOLDS - Real images ke liye higher
     if local_edit_score > 0.60 or rd_score > 0.70 or ela_score > 0.65:
         verdict = "FAKE"
     elif final_score > 0.52:
         verdict = "SUSPICIOUS"
     else:
         verdict = "REAL"
-    
-    print(f"Verdict: {verdict}")
-    print(f"==================")
     
     layer_scores = {
         'Reality Defender (Face)': rd_score,
