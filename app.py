@@ -188,12 +188,12 @@ def generate_ela_image(image, quality=90):
     return ela_img
 
 def detect_local_edits_enhanced(image_file):
-    """Slightly more sensitive detection for fake content"""
+    """More sensitive detection for fake content"""
     try:
         img = Image.open(image_file).convert('RGB')
         img_array = np.array(img)
         
-        fake_score = 0.15  # Higher base score
+        fake_score = 0.20  # Higher base score
         reasons = []
         
         # 1. Multi-quality ELA test
@@ -207,11 +207,12 @@ def detect_local_edits_enhanced(image_file):
         avg_ela = np.mean(ela_scores)
         ela_std = np.std(ela_scores)
         
-        if ela_std > 0.18:  # More sensitive (was 0.22)
-            fake_score += 0.28
-            reasons.append("Inconsistent ELA across qualities (possible editing)")
-        elif avg_ela > 0.32:  # More sensitive (was 0.38)
-            fake_score += 0.22
+        # Lower thresholds = more sensitive
+        if ela_std > 0.12:
+            fake_score += 0.30
+            reasons.append("Inconsistent ELA across qualities (editing detected)")
+        elif avg_ela > 0.25:
+            fake_score += 0.25
             reasons.append("High ELA intensity detected")
         
         # 2. Edge analysis
@@ -220,9 +221,9 @@ def detect_local_edits_enhanced(image_file):
         edges = np.abs(ndimage.sobel(gray))
         edge_density = np.mean(edges)
         
-        if edge_density > 65:  # More sensitive (was 75)
-            fake_score += 0.15
-            reasons.append("Unnatural edge patterns")
+        if edge_density > 50:
+            fake_score += 0.20
+            reasons.append("Unnatural edge patterns detected")
         
         # 3. Texture consistency check
         h, w = gray.shape
@@ -235,17 +236,19 @@ def detect_local_edits_enhanced(image_file):
         quadrant_vars = [np.var(q) for q in quadrants]
         var_std = np.std(quadrant_vars)
         
-        if var_std > 45:  # More sensitive (was 52)
-            fake_score += 0.15
+        if var_std > 35:
+            fake_score += 0.20
             reasons.append("Inconsistent texture across regions")
         
         fake_score = min(fake_score, 0.95)
+        
+        print(f"Local Edit Score: {fake_score:.2f}, Reasons: {reasons}")
         
         return fake_score, " | ".join(reasons) if reasons else "No obvious manipulation detected"
         
     except Exception as e:
         print(f"Local edits detection error: {e}")
-        return 0.20, "Local edit analysis failed"
+        return 0.30, "Local edit analysis failed"
 # ==================== LAYER 3: ENHANCED NOISE ANALYSIS ====================
 def layer3_noise_analysis(image_file):
     """Enhanced noise analysis for AI detection"""
@@ -360,7 +363,7 @@ def generate_image_reasoning_and_suggestions(result, layer_scores):
 
 # ==================== IMAGE ANALYSIS ====================
 def analyze_image_complete(image_file, api_key):
-    """4-layer ensemble analysis with balanced thresholds"""
+    """4-layer ensemble analysis"""
     
     image_file.seek(0)
     rd_score = layer1_reality_defender(image_file, api_key) if api_key else 0.5
@@ -377,25 +380,29 @@ def analyze_image_complete(image_file, api_key):
     image_file.seek(0)
     meta_score, meta_reason = layer4_metadata_analysis(image_file)
     
-    # DEBUG: Print scores to see what's happening
+    # Debug prints - check terminal for these values
+    print(f"=== DEBUG SCORES ===")
     print(f"RD Score: {rd_score:.2f}")
     print(f"Local Edit Score: {local_edit_score:.2f}")
     print(f"ELA Score: {ela_score:.2f}")
     print(f"Noise Score: {noise_score:.2f}")
     print(f"Meta Score: {meta_score:.2f}")
     
-    # Calculate weighted score
-    final_score = (rd_score * 0.20) + (local_edit_score * 0.35) + (ela_score * 0.25) + (noise_score * 0.15) + (meta_score * 0.05)
+    # Calculate final score - higher weight to local_edit_score
+    final_score = (rd_score * 0.15) + (local_edit_score * 0.45) + (ela_score * 0.20) + (noise_score * 0.15) + (meta_score * 0.05)
     
     print(f"Final Score: {final_score:.2f}")
     
-    # THRESHOLDS
-    if final_score > 0.52:
+    # LOWER THRESHOLDS - so fake images get detected
+    if final_score > 0.48:
         verdict = "FAKE"
-    elif final_score > 0.40:
+    elif final_score > 0.35:
         verdict = "SUSPICIOUS"
     else:
         verdict = "REAL"
+    
+    print(f"Verdict: {verdict}")
+    print(f"==================")
     
     layer_scores = {
         'Reality Defender (Face)': rd_score,
