@@ -193,7 +193,7 @@ def detect_local_edits_enhanced(image_file):
         img = Image.open(image_file).convert('RGB')
         img_array = np.array(img)
         
-        fake_score = 0.20  # Higher base score
+        fake_score = 0.35  # 🔥 Increased base score (was 0.20)
         reasons = []
         
         # 1. Multi-quality ELA test
@@ -207,12 +207,11 @@ def detect_local_edits_enhanced(image_file):
         avg_ela = np.mean(ela_scores)
         ela_std = np.std(ela_scores)
         
-        # Lower thresholds = more sensitive
-        if ela_std > 0.12:
-            fake_score += 0.30
-            reasons.append("Inconsistent ELA across qualities (editing detected)")
-        elif avg_ela > 0.25:
+        if ela_std > 0.10:  # Lowered threshold
             fake_score += 0.25
+            reasons.append("Inconsistent ELA across qualities")
+        elif avg_ela > 0.20:  # Lowered threshold
+            fake_score += 0.20
             reasons.append("High ELA intensity detected")
         
         # 2. Edge analysis
@@ -221,9 +220,9 @@ def detect_local_edits_enhanced(image_file):
         edges = np.abs(ndimage.sobel(gray))
         edge_density = np.mean(edges)
         
-        if edge_density > 50:
-            fake_score += 0.20
-            reasons.append("Unnatural edge patterns detected")
+        if edge_density > 45:  # Lowered threshold
+            fake_score += 0.15
+            reasons.append("Unnatural edge patterns")
         
         # 3. Texture consistency check
         h, w = gray.shape
@@ -236,8 +235,8 @@ def detect_local_edits_enhanced(image_file):
         quadrant_vars = [np.var(q) for q in quadrants]
         var_std = np.std(quadrant_vars)
         
-        if var_std > 35:
-            fake_score += 0.20
+        if var_std > 30:  # Lowered threshold
+            fake_score += 0.15
             reasons.append("Inconsistent texture across regions")
         
         fake_score = min(fake_score, 0.95)
@@ -248,7 +247,7 @@ def detect_local_edits_enhanced(image_file):
         
     except Exception as e:
         print(f"Local edits detection error: {e}")
-        return 0.30, "Local edit analysis failed"
+        return 0.35, "Local edit analysis failed"
 # ==================== LAYER 3: ENHANCED NOISE ANALYSIS ====================
 def layer3_noise_analysis(image_file):
     """Enhanced noise analysis for AI detection"""
