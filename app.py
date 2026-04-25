@@ -347,17 +347,18 @@ def generate_image_reasoning_and_suggestions(result, layer_scores):
         reasoning.append(f"🟢 REAL IMAGE (Score: {fake_score*100:.1f}%)")
     
     # Layer-wise details - ALWAYS show if scores are high
-      if rd_score > 0.65:
+    if rd_score > 0.55:
         reasoning.append("🔴 Face/Deepfake manipulation detected")
     
-    if local_edit_score > 0.60:
+    if local_edit_score > 0.50:
         reasoning.append("🔴 Local editing detected (possible clothes/background change)")
     
-    if ai_noise_score > 0.65:
+    if ai_noise_score > 0.55:
         reasoning.append("🔴 AI generation artifacts detected")
     
-    if ela_score > 0.60:
+    if ela_score > 0.50:
         reasoning.append("🔴 Compression artifacts detected")
+    
     # Suggestions based on verdict
     if result['class'] == 'FAKE':
         suggestions.append("🚨 Do NOT share this image without verification")
