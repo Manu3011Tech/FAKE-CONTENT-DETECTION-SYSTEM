@@ -1,6 +1,6 @@
 """
 Fake News Detection System - 4 Layer Ensemble Detection
-No OpenCV - Uses PIL and numpy only
+Complete with Text Analysis, Image Analysis, and Suggestions
 """
 
 import streamlit as st
@@ -14,7 +14,113 @@ import io
 import requests
 import base64
 from scipy.fft import fft2
-from scipy.stats import entropy
+
+# ==================== TEXT MODEL LOAD ====================
+@st.cache_resource
+def load_text_model():
+    """Load the trained text model"""
+    model_path = 'models/text_model.pkl'
+    if not os.path.exists(model_path):
+        st.sidebar.error("❌ Text model not found")
+        return None, None
+    try:
+        with open(model_path, 'rb') as f:
+            data = pickle.load(f)
+        st.sidebar.success("✅ Text Model: Loaded")
+        return data['vectorizer'], data['classifier']
+    except Exception as e:
+        st.sidebar.error(f"Error loading text model")
+        return None, None
+
+# ==================== TEXT REASONING WITH SUGGESTIONS ====================
+def generate_text_reasoning(text, fake_score):
+    """Generate detailed reasoning for text - Both Fake and Real"""
+    text_lower = text.lower()
+    reasoning = []
+    suggestions = []
+    
+    # ===== FAKE NEWS INDICATORS =====
+    sensational = ['breaking', 'urgent', 'shocking', 'viral', 'alert', 'warning', 'breaking news', 'exclusive', 'secret', 'miracle', 'unbelievable']
+    found_sensational = [w for w in sensational if w in text_lower]
+    if found_sensational:
+        reasoning.append(f"⚠️ Sensational language detected: {', '.join(found_sensational[:3])}")
+        suggestions.append("✓ Verify claims with official sources before sharing")
+    
+    caps_count = sum(1 for c in text if c.isupper())
+    caps_ratio = caps_count / max(len(text), 1)
+    if caps_ratio > 0.15:
+        reasoning.append(f"⚠️ Excessive capitalization ({caps_ratio:.0%} of text is uppercase)")
+        suggestions.append("✓ Legitimate news rarely uses all caps for emphasis")
+    
+    exclamation_count = text.count('!')
+    if exclamation_count > 2:
+        reasoning.append(f"⚠️ Multiple exclamations found ({exclamation_count} ! marks)")
+        suggestions.append("✓ Excessive punctuation often indicates emotional manipulation")
+    
+    question_count = text.count('?')
+    if question_count > 2:
+        reasoning.append(f"⚠️ Multiple rhetorical questions detected ({question_count})")
+        suggestions.append("✓ Real news reports facts, doesn't ask provocative questions")
+    
+    urgent_words = ['urgent', 'immediately', 'asap', 'now', 'breaking', 'alert', 'warning']
+    found_urgent = [w for w in urgent_words if w in text_lower]
+    if found_urgent:
+        reasoning.append(f"⚠️ Urgency language: {', '.join(found_urgent[:2])}")
+        suggestions.append("✓ Fake news creates false urgency to prevent verification")
+    
+    clickbait_patterns = ["you won't believe", "doctors hate", "this one trick", "click here", "share this", "before deleted", "must watch", "viral video"]
+    found_clickbait = [p for p in clickbait_patterns if p in text_lower]
+    if found_clickbait:
+        reasoning.append(f"⚠️ Clickbait pattern detected: {found_clickbait[0]}")
+        suggestions.append("✓ Sensational headlines often hide lack of real content")
+    
+    # Check for missing or fake sources
+    source_words = ['according to', 'reuters', 'ap', 'associated press', 'bbc', 'cnn', 'times', 'post', 'source', 'official']
+    found_sources = [s for s in source_words if s in text_lower]
+    if not found_sources and len(text.split()) > 100:
+        reasoning.append("⚠️ No credible sources cited in article")
+        suggestions.append("✓ Always check if the news cites verifiable sources")
+    
+    # ===== REAL NEWS INDICATORS =====
+    formal_words = ['announced', 'statement', 'official', 'government', 'president', 'minister', 'department', 'commission', 'report', 'study', 'research', 'published']
+    found_formal = [w for w in formal_words if w in text_lower]
+    if len(found_formal) >= 2:
+        reasoning.append(f"✅ Formal/official language detected (mentions: {', '.join(found_formal[:2])})")
+    
+    if found_sources:
+        reasoning.append(f"✅ Source attribution found: {', '.join(found_sources[:2])}")
+    
+    # Check for balanced language
+    balanced_indicators = ['however', 'although', 'while', 'according to', 'said', 'reported', 'stated', 'confirmed']
+    found_balanced = [b for b in balanced_indicators if b in text_lower]
+    if len(found_balanced) >= 2:
+        reasoning.append("✅ Balanced reporting indicators detected")
+    
+    # ===== OVERALL ASSESSMENT =====
+    if fake_score > 0.7:
+        reasoning.append("🔴 VERDICT: HIGH PROBABILITY OF FAKE NEWS")
+        suggestions.append("🚨 Do NOT share this content without verification")
+        suggestions.append("✓ Check fact-checking websites (Snopes, FactCheck.org, AltNews)")
+        suggestions.append("✓ Look for the original source of the information")
+    elif fake_score > 0.5:
+        reasoning.append("🟠 VERDICT: SUSPICIOUS - Multiple red flags")
+        suggestions.append("⚠️ Cross-reference with multiple trusted news sources")
+        suggestions.append("✓ Check the publication date and author credentials")
+    elif fake_score > 0.3:
+        reasoning.append("🟡 VERDICT: UNCERTAIN - Mixed signals")
+        suggestions.append("✓ Verify with trusted sources before sharing")
+        suggestions.append("✓ Look for coverage from mainstream media outlets")
+    else:
+        reasoning.append("🟢 VERDICT: LIKELY REAL - Text patterns consistent with legitimate news")
+        suggestions.append("✅ Content appears legitimate")
+        suggestions.append("✓ Still verify critical claims with official sources")
+    
+    # ===== ADDITIONAL NOTES =====
+    if len(text.split()) < 30:
+        reasoning.append("📝 Note: Short text may affect accuracy")
+    
+    return " | ".join(reasoning), suggestions
+
 
 # ==================== LAYER 1: REALITY DEFENDER API ====================
 def layer1_reality_defender(image_file, api_key):
@@ -94,10 +200,8 @@ def layer3_noise_analysis(image_file):
         img = Image.open(image_file).convert('RGB')
         img_array = np.array(img)
         
-        # Convert to grayscale manually (RGB to grayscale)
         gray = np.dot(img_array[...,:3], [0.299, 0.587, 0.114])
         
-        # 1. Noise variance check
         noise_var = np.var(gray)
         
         if noise_var < 30:
@@ -110,7 +214,7 @@ def layer3_noise_analysis(image_file):
             noise_score = 0.2
             reason_noise = "Normal noise level"
         
-        # 2. Frequency analysis (FFT)
+        # Frequency analysis (FFT)
         f_transform = fft2(gray)
         f_shift = np.fft.fftshift(f_transform)
         magnitude = np.abs(f_shift)
@@ -174,6 +278,44 @@ def layer4_metadata_analysis(image_file):
         return 0.2, "Metadata analysis failed"
 
 
+# ==================== IMAGE REASONING WITH SUGGESTIONS ====================
+def generate_image_reasoning_and_suggestions(result, layer_scores):
+    """Generate image reasoning and suggestions"""
+    reasoning = []
+    suggestions = []
+    
+    if layer_scores.get('Reality Defender', 0) > 0.6:
+        reasoning.append("🔴 Face/Deepfake manipulation detected by AI")
+        suggestions.append("✓ The face in this image appears manipulated")
+        suggestions.append("✓ Check if the person actually made the statement in original source")
+    elif layer_scores.get('Reality Defender', 0) > 0.4:
+        reasoning.append("🟠 Suspicious face patterns detected")
+    
+    if layer_scores.get('ELA (Local edits)', 0) > 0.6:
+        reasoning.append("🔴 Local editing detected (possible clothes/background change)")
+        suggestions.append("✓ The image shows signs of digital manipulation")
+        suggestions.append("✓ Try reverse image search on Google Images")
+    elif layer_scores.get('ELA (Local edits)', 0) > 0.4:
+        reasoning.append("🟠 Some editing artifacts present")
+    
+    if layer_scores.get('Noise/AI Detection', 0) > 0.6:
+        reasoning.append("🔴 AI generation artifacts detected")
+        suggestions.append("✓ This image may be AI-generated, not a real photo")
+        suggestions.append("✓ Look for inconsistencies in hands, teeth, or background")
+    
+    if result['class'] == 'FAKE':
+        suggestions.append("🚨 Do NOT trust or share this image without verification")
+        suggestions.append("✓ Verify the image source through reputable news outlets")
+    elif result['class'] == 'SUSPICIOUS':
+        suggestions.append("⚠️ Be cautious - image shows suspicious characteristics")
+        suggestions.append("✓ Verify before sharing on social media")
+    else:
+        suggestions.append("✅ Image appears authentic")
+        suggestions.append("✓ Still verify the context of the image")
+    
+    return " | ".join(reasoning) if reasoning else "🟢 No major manipulation detected", suggestions
+
+
 # ==================== COMBINED ANALYSIS ====================
 def analyze_image_complete(image_file, api_key):
     """4-layer ensemble analysis"""
@@ -192,23 +334,6 @@ def analyze_image_complete(image_file, api_key):
     
     final_score = (rd_score * 0.30) + (ela_score * 0.30) + (noise_score * 0.25) + (meta_score * 0.15)
     
-    reasoning = []
-    
-    if rd_score > 0.6:
-        reasoning.append(f"🔴 Reality Defender: Face manipulation detected ({rd_score:.0%})")
-    elif rd_score > 0.4:
-        reasoning.append(f"🟠 Reality Defender: Suspicious patterns ({rd_score:.0%})")
-    else:
-        reasoning.append(f"🟢 Reality Defender: No face manipulation")
-    
-    if ela_score > 0.6:
-        reasoning.append(f"🔴 ELA: Local editing detected ({ela_score:.0%}) - Possible clothes change")
-    elif ela_score > 0.4:
-        reasoning.append(f"🟠 ELA: Some editing artifacts")
-    
-    if noise_score > 0.6:
-        reasoning.append(f"🔴 AI Detection: AI artifacts found ({noise_score:.0%})")
-    
     if final_score > 0.6:
         verdict = "FAKE"
     elif final_score > 0.4:
@@ -216,17 +341,21 @@ def analyze_image_complete(image_file, api_key):
     else:
         verdict = "REAL"
     
+    layer_scores = {
+        'Reality Defender (Face)': rd_score,
+        'ELA (Local edits)': ela_score,
+        'Noise/AI Detection': noise_score,
+        'Metadata': meta_score
+    }
+    
     return {
         'fake_score': final_score,
         'class': verdict,
         'confidence': 1 - abs(final_score - 0.5) * 2,
-        'reasoning': " | ".join(reasoning),
-        'layer_scores': {
-            'Reality Defender': rd_score,
-            'ELA (Local edits)': ela_score,
-            'Noise/AI Detection': noise_score,
-            'Metadata': meta_score
-        }
+        'layer_scores': layer_scores,
+        'ela_reason': ela_reason,
+        'noise_reason': noise_reason,
+        'meta_reason': meta_reason
     }
 
 
@@ -261,51 +390,16 @@ def analyze_image_basic(image_file):
         
         return {
             'fake_score': fake_score,
-            'class': 'Fake' if fake_score > 0.5 else 'Real',
+            'class': 'FAKE' if fake_score > 0.5 else 'REAL',
             'confidence': 0.6,
-            'reasoning': " | ".join(reasoning) if reasoning else "Basic analysis - No manipulation detected",
-            'layer_scores': {'Basic': fake_score}
+            'reasoning': " | ".join(reasoning) if reasoning else "Basic analysis complete",
+            'layer_scores': {'Basic Analysis': fake_score}
         }
     except Exception as e:
         return None
 
 
-# ==================== TEXT ANALYSIS ====================
-@st.cache_resource
-def load_text_model():
-    model_path = 'models/text_model.pkl'
-    if not os.path.exists(model_path):
-        return None, None
-    try:
-        with open(model_path, 'rb') as f:
-            data = pickle.load(f)
-        return data['vectorizer'], data['classifier']
-    except:
-        return None, None
-
-def generate_text_reasoning(text, fake_score):
-    text_lower = text.lower()
-    reasoning = []
-    
-    sensational = ['breaking', 'urgent', 'shocking', 'viral', 'alert', 'warning']
-    found = [w for w in sensational if w in text_lower]
-    if found:
-        reasoning.append(f"Sensational language: {', '.join(found[:3])}")
-    
-    caps_count = sum(1 for c in text if c.isupper())
-    caps_ratio = caps_count / max(len(text), 1)
-    if caps_ratio > 0.15:
-        reasoning.append(f"Excessive capitalization")
-    
-    if fake_score > 0.7:
-        reasoning.append("HIGH PROBABILITY of misinformation")
-    elif fake_score > 0.5:
-        reasoning.append("Some indicators of potential fake news")
-    else:
-        reasoning.append("Text patterns consistent with legitimate news")
-    
-    return " | ".join(reasoning)
-
+# ==================== GAUGE CHART ====================
 def create_gauge_chart(score, title="Fake Score"):
     fig, ax = plt.subplots(figsize=(8, 3))
     
@@ -337,14 +431,28 @@ def create_gauge_chart(score, title="Fake Score"):
 # ==================== STREAMLIT UI ====================
 st.set_page_config(page_title="Fake Content Detection", page_icon="🛡️", layout="wide")
 
+# Custom CSS for better suggestions display
+st.markdown("""
+<style>
+.suggestion-box {
+    background-color: #f0f2f6;
+    padding: 15px;
+    border-radius: 10px;
+    margin: 10px 0;
+}
+</style>
+""", unsafe_allow_html=True)
+
 st.title("🛡️ Fake Content Detection System")
 st.markdown("*4-Layer Ensemble: Face + Local Edits + AI Artifacts + Metadata*")
 
+# Load models
 vectorizer, classifier = load_text_model()
 API_KEY = st.secrets.get("REALITY_DEFENDER_API_KEY", "")
 
+# Sidebar
 with st.sidebar:
-    st.header("System Status")
+    st.header("📊 System Status")
     
     if vectorizer and classifier:
         st.success("✅ Text Model: Ready")
@@ -358,44 +466,107 @@ with st.sidebar:
     
     st.success("✅ ELA: Ready (Local edits)")
     st.success("✅ AI Detection: Ready")
+    
+    st.markdown("---")
+    st.header("📌 How It Works")
+    st.markdown("""
+    **4 Detection Layers:**
+    1. **Face/Deepfake** - AI face manipulation
+    2. **ELA** - Photoshop, clothes change
+    3. **AI Artifacts** - GAN/Diffusion patterns
+    4. **Metadata** - File integrity check
+    """)
 
+# Tabs
 tab1, tab2 = st.tabs(["📝 Text Analysis", "🖼️ Image Analysis"])
 
-# Text Analysis Tab
+# ==================== TAB 1: TEXT ANALYSIS WITH SUGGESTIONS ====================
 with tab1:
-    st.header("Analyze News Article")
+    st.header("🔍 Analyze News Article")
     
-    news_text = st.text_area("Enter or paste the news article:", height=150)
+    # Example buttons
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("📋 Load Fake Example", use_container_width=True):
+            st.session_state['news_text'] = "URGENT! Breaking news! You won't believe what happened! Click here now! Share before deleted! This is the biggest secret they don't want you to know! Miracle cure that doctors hate!"
+    with col2:
+        if st.button("📋 Load Real Example", use_container_width=True):
+            st.session_state['news_text'] = "The president announced new economic policies today at the White House. According to official sources, the plan includes tax incentives for small businesses and infrastructure funding. The announcement was made during a press conference with members of the press."
     
-    if st.button("Analyze Text", type="primary"):
+    default_text = st.session_state.get('news_text', '')
+    news_text = st.text_area(
+        "Enter or paste the news article:",
+        height=200,
+        value=default_text,
+        placeholder="Paste the news article text here..."
+    )
+    
+    col1, col2 = st.columns([1, 5])
+    with col1:
+        analyze_btn = st.button("🔍 Analyze Text", type="primary", use_container_width=True)
+    
+    if analyze_btn:
         if news_text and vectorizer and classifier:
-            processed = news_text.lower()
-            processed = re.sub(r'[^a-zA-Z\s]', '', processed)
-            features = vectorizer.transform([processed])
-            proba = classifier.predict_proba(features)[0]
-            fake_score = proba[0]
-            
-            if fake_score > 0.5:
-                st.error(f"## FAKE NEWS DETECTED")
-            else:
-                st.success(f"## REAL NEWS")
-            
-            st.metric("Fake Score", f"{fake_score*100:.1f}%")
-            st.pyplot(create_gauge_chart(fake_score, "Fake News Probability"))
-            plt.close()
-            st.info(generate_text_reasoning(news_text, fake_score))
+            with st.spinner("Analyzing text..."):
+                processed = news_text.lower()
+                processed = re.sub(r'[^a-zA-Z\s]', '', processed)
+                features = vectorizer.transform([processed])
+                proba = classifier.predict_proba(features)[0]
+                
+                fake_score = proba[0]
+                confidence = max(proba)
+                
+                # Result
+                col1, col2 = st.columns(2)
+                with col1:
+                    if fake_score > 0.5:
+                        st.error(f"## ⚠️ FAKE NEWS DETECTED")
+                    else:
+                        st.success(f"## ✅ REAL NEWS")
+                
+                with col2:
+                    st.metric("Fake Score", f"{fake_score*100:.1f}%")
+                    st.metric("Confidence", f"{confidence*100:.1f}%")
+                
+                # Gauge chart
+                st.pyplot(create_gauge_chart(fake_score, "Fake News Probability"))
+                plt.close()
+                
+                # Detailed Reasoning
+                st.subheader("🔍 Detailed Analysis")
+                reasoning, suggestions = generate_text_reasoning(news_text, fake_score)
+                st.info(reasoning)
+                
+                # Suggestions Box
+                st.subheader("💡 What You Should Do")
+                for suggestion in suggestions:
+                    st.write(suggestion)
+                
+        elif not news_text:
+            st.warning("Please enter some text to analyze")
+        else:
+            st.error("Text model not loaded. Please check models/text_model.pkl")
 
-# Image Analysis Tab
+# ==================== TAB 2: IMAGE ANALYSIS WITH SUGGESTIONS ====================
 with tab2:
-    st.header("Analyze Image - 4 Layer Detection")
+    st.header("🖼️ Analyze Image")
     st.caption("Detects: Face swap | Deepfake | Clothes change | AI generated | Photoshop")
     
-    uploaded_image = st.file_uploader("Choose an image...", type=['jpg', 'jpeg', 'png', 'webp'])
+    uploaded_image = st.file_uploader(
+        "Choose an image...",
+        type=['jpg', 'jpeg', 'png', 'webp'],
+        key="image_upload"
+    )
     
     if uploaded_image:
-        st.image(uploaded_image, caption="Uploaded Image", use_column_width=True)
+        col1, col2 = st.columns(2)
         
-        if st.button("Analyze Image", type="primary"):
+        with col1:
+            st.image(uploaded_image, caption="Uploaded Image", use_column_width=True)
+            img = Image.open(uploaded_image)
+            st.caption(f"📐 Dimensions: {img.size[0]} x {img.size[1]} pixels")
+        
+        if st.button("🔍 Analyze Image", type="primary", use_container_width=True):
             with st.spinner("Analyzing with 4-layer ensemble..."):
                 if API_KEY:
                     result = analyze_image_complete(uploaded_image, API_KEY)
@@ -403,25 +574,43 @@ with tab2:
                     result = analyze_image_basic(uploaded_image)
                 
                 if result:
-                    if result['class'] == 'FAKE':
-                        st.error(f"## {result['class']} IMAGE DETECTED")
-                    elif result['class'] == 'SUSPICIOUS':
-                        st.warning(f"## {result['class']} IMAGE")
-                    else:
-                        st.success(f"## {result['class']} IMAGE")
+                    with col2:
+                        if result['class'] == 'FAKE':
+                            st.error(f"## ⚠️ FAKE IMAGE DETECTED")
+                        elif result['class'] == 'SUSPICIOUS':
+                            st.warning(f"## ⚠️ SUSPICIOUS IMAGE")
+                        else:
+                            st.success(f"## ✅ REAL IMAGE")
                     
-                    st.metric("Final Fake Score", f"{result['fake_score']*100:.1f}%")
-                    st.metric("Confidence", f"{result['confidence']*100:.1f}%")
+                    # Metrics
+                    col_a, col_b, col_c = st.columns(3)
+                    with col_a:
+                        st.metric("Fake Score", f"{result['fake_score']*100:.1f}%")
+                    with col_b:
+                        st.metric("Confidence", f"{result['confidence']*100:.1f}%")
+                    with col_c:
+                        st.metric("Verdict", result['class'])
                     
+                    # Gauge chart
                     st.pyplot(create_gauge_chart(result['fake_score'], "Overall Fake Score"))
                     plt.close()
                     
-                    with st.expander("📊 Layer-wise Analysis"):
+                    # Layer analysis
+                    with st.expander("📊 Layer-wise Technical Analysis"):
                         if 'layer_scores' in result:
                             for layer, score in result['layer_scores'].items():
                                 st.progress(score, text=f"{layer}: {score*100:.1f}%")
                     
-                    st.info(result['reasoning'])
+                    # Image Reasoning and Suggestions
+                    st.subheader("🔍 Detection Details")
+                    img_reasoning, img_suggestions = generate_image_reasoning_and_suggestions(result, result.get('layer_scores', {}))
+                    st.info(img_reasoning)
+                    
+                    # Suggestions Box
+                    st.subheader("💡 What You Should Do")
+                    for suggestion in img_suggestions:
+                        st.write(suggestion)
 
+# Footer
 st.markdown("---")
-st.markdown("🛡️ **Fake Content Detection System** | 4-Layer Ensemble")
+st.markdown("🛡️ **Fake Content Detection System** | 4-Layer Ensemble | AI-Powered Misinformation Detection")
