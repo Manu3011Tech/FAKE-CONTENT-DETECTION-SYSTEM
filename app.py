@@ -12,7 +12,6 @@ from PIL import Image
 import io
 import torch
 # import torch ke baad ye check add karo
-import torch
 print(f"PyTorch version: {torch.__version__}")
 from transformers import AutoImageProcessor, AutoModelForImageClassification
 
@@ -48,24 +47,34 @@ def load_text_model():
 # ==================== LOAD IMAGE MODEL ====================
 @st.cache_resource
 def load_image_model():
-    """Load the pre-trained image model"""
+    """Load image model - Auto download if not exists"""
     try:
-        base_dir = os.path.dirname(os.path.abspath(__file__))
-        model_path = os.path.join(base_dir, 'models/image_model')
-        processor_path = os.path.join(base_dir, 'models/image_processor')
+        # Pehle check karo model hai ya nahi
+        model_path = 'models/image_model'
+        processor_path = 'models/image_processor'
         
-        if not os.path.exists(model_path):
-            st.sidebar.warning("⚠️ Image model not found")
-            return None, None
+        if os.path.exists(model_path):
+            # Local hai toh load karo
+            processor = AutoImageProcessor.from_pretrained(processor_path, local_files_only=True)
+            model = AutoModelForImageClassification.from_pretrained(model_path, local_files_only=True)
+            st.sidebar.success("✅ Image Model: Loaded from local")
+        else:
+            # Nahi hai toh download karo (pehli baar time lagega)
+            with st.spinner("Downloading image model (343MB)... First time takes 2-3 minutes"):
+                processor = AutoImageProcessor.from_pretrained('dima806/deepfake_vs_real_image_detection')
+                model = AutoModelForImageClassification.from_pretrained('dima806/deepfake_vs_real_image_detection')
+                
+                # Save locally for next time
+                os.makedirs(model_path, exist_ok=True)
+                os.makedirs(processor_path, exist_ok=True)
+                processor.save_pretrained(processor_path)
+                model.save_pretrained(model_path)
+                st.sidebar.success("✅ Image Model: Downloaded and saved")
         
-        processor = AutoImageProcessor.from_pretrained(processor_path, local_files_only=True)
-        model = AutoModelForImageClassification.from_pretrained(model_path, local_files_only=True)
         model.eval()
-        
-        st.sidebar.success("✅ Image Model: Loaded (Deep Learning)")
         return processor, model
     except Exception as e:
-        st.sidebar.error(f"❌ Image Model: Not Loaded")
+        st.sidebar.warning(f"⚠️ Image Model: {str(e)[:50]}")
         return None, None
 
 # ==================== IMAGE ANALYSIS FUNCTION ====================
