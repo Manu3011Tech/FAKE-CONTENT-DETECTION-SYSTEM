@@ -86,7 +86,7 @@ def analyze_image_deep(image_file, processor, model):
     """REALITY DEFENDER API - Better detection for all types of fakes"""
     
     # Reality Defender API key (Streamlit secrets mein rakhna)
-    API_KEY = st.secrets.get("REALITY_DEFENDER_API_KEY", "your-api-key-here")
+    API_KEY = st.secrets.get("REALITY_DEFENDER_API_KEY", "rd_2602bf3c6ff42408_dc7b51e3115bc0a20b8e83fb7e8802c4")
     
     try:
         # Convert image to base64
