@@ -420,7 +420,7 @@ def analyze_image_complete(image_file, api_key):
         'ela_reason': ela_reason,
         'noise_reason': noise_reason,
         'meta_reason': meta_reason,
-        'local_edit_reason': local_edit_reaction
+        'local_edit_reason': local_edit_reason
     }
 def analyze_image_basic(image_file):
     """Basic analysis fallback"""
