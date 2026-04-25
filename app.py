@@ -353,8 +353,9 @@ def generate_image_reasoning_and_suggestions(result, layer_scores):
     if local_edit_score > 0.50:
         reasoning.append("🔴 Local editing detected (possible clothes/background change)")
     
-    if ai_noise_score > 0.55:
+       if ai_noise_score > 0.70:
         reasoning.append("🔴 AI generation artifacts detected")
+        
     
     if ela_score > 0.50:
         reasoning.append("🔴 Compression artifacts detected")
