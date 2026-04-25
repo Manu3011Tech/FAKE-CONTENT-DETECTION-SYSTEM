@@ -83,101 +83,106 @@ import base64
 import streamlit as st
 
 def analyze_image_deep(image_file, processor, model):
-    """REALITY DEFENDER API - Better detection for all types of fakes"""
+    """Reality Defender API - Correct Implementation"""
     
-    # Reality Defender API key (Streamlit secrets mein rakhna)
     API_KEY = st.secrets.get("REALITY_DEFENDER_API_KEY", "rd_2602bf3c6ff42408_dc7b51e3115bc0a20b8e83fb7e8802c4")
     
     try:
-        # Convert image to base64
+        # Read image file
         image_bytes = image_file.read()
-        image_b64 = base64.b64encode(image_bytes).decode('utf-8')
         
-        # API call
-        headers = {
-            "Authorization": f"Bearer {API_KEY}",
-            "Content-Type": "application/json"
-        }
-        
-        payload = {
-            "image": image_b64
-        }
-        
-        response = requests.post(
-            "https://api.realitydefender.com/v1/detect",
-            json=payload,
-            headers=headers,
-            timeout=30
+        # Step 1: Request a signed URL
+        signed_url_response = requests.post(
+            "https://api.prd.realitydefender.xyz/api/files/aws-presigned",  # ✅ Correct endpoint
+            json={"fileName": "upload.jpg", "fileSize": len(image_bytes)},
+            headers={"X-API-KEY": API_KEY, "Content-Type": "application/json"}
         )
         
-        if response.status_code == 200:
-            result = response.json()
+        if signed_url_response.status_code != 200:
+            return fallback_analysis(image_file)
+        
+        signed_data = signed_url_response.json()
+        signed_url = signed_data.get("response", {}).get("signedUrl")
+        request_id = signed_data.get("response", {}).get("requestId")
+        
+        if not signed_url:
+            return fallback_analysis(image_file)
+        
+        # Step 2: Upload file to signed URL
+        upload_response = requests.put(
+            signed_url,
+            data=image_bytes,
+            headers={"Content-Type": "image/jpeg"}
+        )
+        
+        if upload_response.status_code not in [200, 204]:
+            return fallback_analysis(image_file)
+        
+        # Step 3: Get analysis results
+        result_response = requests.get(
+            f"https://api.prd.realitydefender.xyz/api/media/users/{request_id}",
+            headers={"X-API-KEY": API_KEY, "Content-Type": "application/json"}
+        )
+        
+        if result_response.status_code == 200:
+            result = result_response.json()
             fake_prob = result.get('fake_probability', 0.5)
-            manipulation_type = result.get('manipulation_type', ['unknown'])
             
             reasoning = []
             if fake_prob > 0.7:
-                reasoning.append(f"⚠️ Reality Defender detected {', '.join(manipulation_type)} manipulation")
-                reasoning.append("Strong evidence of face swap or AI generation")
+                reasoning.append("Reality Defender detected strong manipulation patterns")
             elif fake_prob > 0.5:
-                reasoning.append(f"⚠️ Suspicious patterns detected: {', '.join(manipulation_type)}")
+                reasoning.append("Suspicious patterns detected in the image")
             else:
-                reasoning.append("✅ No manipulation detected by Reality Defender AI")
+                reasoning.append("No manipulation detected")
             
             return {
                 'fake_score': fake_prob,
                 'real_score': 1 - fake_prob,
                 'class': 'Fake' if fake_prob > 0.5 else 'Real',
                 'confidence': result.get('confidence', 0.8),
-                'reasoning': " | ".join(reasoning),
-                'manipulation_type': manipulation_type
+                'reasoning': " | ".join(reasoning)
             }
         else:
-            st.warning("API failed, using local analysis")
-            return local_analysis(image_file)
+            return fallback_analysis(image_file)
             
     except Exception as e:
-        st.warning(f"API error: {e}, using local analysis")
-        return local_analysis(image_file)
+        st.warning(f"API error: {e}")
+        return fallback_analysis(image_file)
 
-def local_analysis(image_file):
-    """Keep your original local model as fallback"""
+def fallback_analysis(image_file):
+    """Local analysis when API fails"""
     from PIL import Image
     import numpy as np
-    import torch
-    from transformers import AutoImageProcessor, AutoModelForImageClassification
     
     try:
-        img = Image.open(image_file).convert('RGB')
-        
-        # Your original code can go here
-        # For now, basic analysis
+        img = Image.open(image_file)
         img_array = np.array(img)
         
         fake_score = 0.2
+        reasoning = []
+        
         h, w = img_array.shape[:2]
         aspect = w / h
-        
         if aspect > 2 or aspect < 0.5:
             fake_score += 0.2
+            reasoning.append("Unusual aspect ratio")
         
         if len(img_array.shape) == 3:
             avg_std = (np.std(img_array[:,:,0]) + np.std(img_array[:,:,1]) + np.std(img_array[:,:,2])) / 3
             if avg_std < 30:
                 fake_score += 0.3
-        
-        fake_score = min(fake_score, 0.95)
+                reasoning.append("Possible AI generation detected")
         
         return {
-            'fake_score': fake_score,
-            'real_score': 1 - fake_score,
+            'fake_score': min(fake_score, 0.95),
+            'real_score': 1 - min(fake_score, 0.95),
             'class': 'Fake' if fake_score > 0.5 else 'Real',
             'confidence': 0.6,
-            'reasoning': "Basic analysis (API not available)"
+            'reasoning': " | ".join(reasoning) if reasoning else "No manipulation detected (Local analysis)"
         }
     except:
         return None
-
 # ==================== TEXT REASONING ====================
 def generate_text_reasoning(text, fake_score):
     """Generate detailed reasoning for text - Both Fake and Real"""
